@@ -57,5 +57,7 @@ jobs:
           name: Dubtitler v0.1.0 (Preview)
           prerelease: true
           generate_release_notes: true
-          files: |\n            installer/output/Dubtitler-Setup.exe\n            Dubtitler-Portable.zip
+          files: |
+            installer/output/Dubtitler-Setup.exe
+            Dubtitler-Portable.zip
           fail_on_unmatched_files: true
