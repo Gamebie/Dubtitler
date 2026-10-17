@@ -27,6 +27,16 @@ jobs:
         shell: pwsh
         run: |
           pyinstaller --noconfirm --clean --windowed --onedir --name Dubtitler --collect-all faster_whisper --collect-all ctranslate2 --collect-all tokenizers main.py
+      - name: Package portable ZIP
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/Dubtitler/*" -DestinationPath "Dubtitler-Portable.zip" -Force
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dubtitler-Portable
+          path: Dubtitler-Portable.zip
+          if-no-files-found: error
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --yes --no-progress
@@ -47,5 +57,5 @@ jobs:
           name: Dubtitler v0.1.0 (Preview)
           prerelease: true
           generate_release_notes: true
-          files: installer/output/Dubtitler-Setup.exe
+          files: |\n            installer/output/Dubtitler-Setup.exe\n            Dubtitler-Portable.zip
           fail_on_unmatched_files: true
