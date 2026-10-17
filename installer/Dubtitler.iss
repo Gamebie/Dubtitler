@@ -14,7 +14,7 @@ PrivilegesRequired=lowest
 WizardStyle=modern
 UninstallDisplayIcon={app}\Dubtitler.exe
 [Files]
-Source: "..\dist\Dubtitler\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "{#SourcePath}..\dist\Dubtitler\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 [Icons]
 Name: "{autoprograms}\Dubtitler"; Filename: "{app}\Dubtitler.exe"
 Name: "{autodesktop}\Dubtitler"; Filename: "{app}\Dubtitler.exe"; Tasks: desktopicon
