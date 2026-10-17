@@ -1,4 +1,4 @@
-name: Build Windows Installer
+name: Build and Publish Windows Installer
 on:
   workflow_dispatch:
   push:
@@ -12,7 +12,7 @@ jobs:
   build:
     runs-on: windows-latest
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -34,8 +34,18 @@ jobs:
         shell: pwsh
         run: |
           & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "installer\Dubtitler.iss"
-      - uses: actions/upload-artifact@v4
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
         with:
           name: Dubtitler-Windows-Installer
           path: installer/output/Dubtitler-Setup.exe
           if-no-files-found: error
+      - name: Publish installer to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.1.0
+          name: Dubtitler v0.1.0 (Preview)
+          prerelease: true
+          generate_release_notes: true
+          files: installer/output/Dubtitler-Setup.exe
+          fail_on_unmatched_files: true
