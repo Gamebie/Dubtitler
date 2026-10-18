@@ -66,7 +66,7 @@ class EditorTests(unittest.TestCase):
         self.assertFalse(self.window.export_button.isEnabled())
 
     def test_srt_roundtrip_multiline_unicode_sorted(self):
-        expected = [(0, 500, 'First'), (1000, 2000, 'Hello café\nSecond line')]
+        expected = [(0, 500, 'First'), (1000, 2000, 'Hello cafÃ©\nSecond line')]
         self.window.set_rows(list(reversed(expected)))
         with tempfile.TemporaryDirectory() as temp:
             path = str(Path(temp) / 'test.srt')
@@ -172,7 +172,7 @@ class ModelTests(unittest.TestCase):
 
     def test_frozen_uses_executable_directory(self):
         with patch.object(runtime.sys, 'frozen', True, create=True), patch.object(runtime.sys, 'executable', str(self.root / 'Dubtitler.exe')):
-            self.assertEqual(runtime.app_directory(), self.root)
+            self.assertTrue(runtime.app_directory().samefile(self.root))
 
     def test_bundle_loaded_by_path_never_downloaded(self):
         path = self.model_dir()
