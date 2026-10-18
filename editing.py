@@ -84,7 +84,7 @@ class EditingSafety:
 
     def document_changed(self):
         self.recovery_saved = False
-        self.setWindowTitle('Dubtitler v0.3.0 — English Dub Subtitle Editor' + (' *' if self.dirty else ''))
+        self.setWindowTitle('Dubtitler v0.4.0 — English Dub Subtitle Editor' + (' *' if self.dirty else ''))
         if self.dirty:
             self.save_status.setText('Unsaved edits · saving recovery…')
             self.autosave_timer.start()
@@ -129,10 +129,10 @@ class EditingSafety:
                 if not lock.tryLock(0):
                     raise OSError('Recovery file is in use')
                 self.recovery_lock = lock
-            write_snapshot(self.recovery_path, {'version': 1, 'video_path': self.video_path, 'srt_path': self.srt_path, 'audio_index': self.audio_tracks.currentData(), 'rows': self._last_rows, 'saved_rows': self._saved_rows})
+            write_snapshot(self.recovery_path, {'version': 1, 'video_path': self.video_path, 'srt_path': self.srt_path, 'audio_index': self.audio_tracks.currentData(), 'transcription_options': self.transcription_options(validate_replacements=False), 'rows': self._last_rows, 'saved_rows': self._saved_rows})
             self.recovery_saved = True
             self.save_status.setText('Unsaved edits · recovery saved')
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             self.save_status.setText('Recovery unavailable · export SRT to save')
             self.statusBar().showMessage(f'Could not save recovery copy: {exc}')
 
@@ -176,6 +176,7 @@ class EditingSafety:
                 self.recovery_path, self.recovery_lock = path, lock
                 adopted = True
                 self.video_path, self.srt_path = data.get('video_path'), data.get('srt_path')
+                self.restore_transcription_options(data.get('transcription_options'))
                 if self.video_path:
                     self.load_video(self.video_path, data.get('audio_index'))
                 self.undo_stack.clear()

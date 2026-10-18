@@ -11,11 +11,12 @@ class Transcriber(QThread):
     cancelled = Signal()
     progress = Signal(str, int)
 
-    def __init__(self, path, model_name, allow_download=False, audio_index=0, target=run_job):
+    def __init__(self, path, model_name, allow_download=False, audio_index=0, target=run_job, options=None):
         super().__init__()
         self.path, self.model_name = path, model_name
         self.allow_download, self.audio_index = allow_download, audio_index
         self.target = target
+        self.options = options
         self.cancel_requested = threading.Event()
         self.process = None
 
@@ -31,7 +32,7 @@ class Transcriber(QThread):
                 return
             context = multiprocessing.get_context('spawn')
             reader, writer = context.Pipe(duplex=False)
-            process = context.Process(target=self.target, args=(writer, self.path, self.model_name, self.allow_download, self.audio_index), daemon=True)
+            process = context.Process(target=self.target, args=(writer, self.path, self.model_name, self.allow_download, self.audio_index, self.options), daemon=True)
             self.process = process
             process.start()
             writer.close()

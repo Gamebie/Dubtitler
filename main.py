@@ -15,13 +15,14 @@ if __name__ == '__main__' and '--smoke-test' in sys.argv:
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QFileDialog, QTableWidget, QTableWidgetItem, QLabel, QSlider,
-    QMessageBox, QComboBox, QSplitter, QAbstractItemView, QProgressBar, QGroupBox, QCheckBox)
+    QMessageBox, QComboBox, QSplitter, QAbstractItemView, QProgressBar, QGroupBox, QCheckBox, QLineEdit)
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from model_runtime import DEFAULT_MODEL, bundled_model
 from transcriber import Transcriber
 from playback import PlaybackTools
 from editing import EditingSafety
+from transcription_options import normalize_options
 
 
 def timestamp(ms):
@@ -45,8 +46,8 @@ def parse_timestamp(value):
 class MainWindow(PlaybackTools, EditingSafety, QMainWindow):
     def __init__(self, recovery_directory=None, offer_recovery=True):
         super().__init__()
-        self.setWindowTitle('Dubtitler v0.3.0 — English Dub Subtitle Editor')
-        self.resize(1200, 850)
+        self.setWindowTitle('Dubtitler v0.4.0 — English Dub Subtitle Editor')
+        self.resize(1200, 950)
         self.video_path = None
         self.busy = False
         self.worker = None
@@ -110,6 +111,34 @@ class MainWindow(PlaybackTools, EditingSafety, QMainWindow):
         transcribe_layout.addWidget(self.model_hint)
         self.allow_download = QCheckBox('Allow a one-time download if this model is missing (internet required; reused from cache afterwards)')
         transcribe_layout.addWidget(self.allow_download)
+        context_row = QHBoxLayout()
+        transcribe_layout.addLayout(context_row)
+        self.context_preset = QComboBox()
+        self.context_preset.addItems(['Custom / no preset', 'Haikyuu — Seijou'])
+        context_row.addWidget(QLabel('Show context:'))
+        context_row.addWidget(self.context_preset)
+        self.show_context = QLineEdit()
+        self.show_context.setMaxLength(200)
+        self.show_context.setPlaceholderText('Optional: show, setting, or topic')
+        context_row.addWidget(self.show_context, 1)
+        self.speaker_changes = QCheckBox('Split at voice changes (offline AI)')
+        self.speaker_changes.setChecked(True)
+        self.speaker_changes.setToolTip('Starts a new cue when a different voice is detected. Adds analysis time; overlapping voices and music can confuse detection. Does not identify character names.')
+        context_row.addWidget(self.speaker_changes)
+        names_row = QHBoxLayout()
+        transcribe_layout.addLayout(names_row)
+        names_row.addWidget(QLabel('Names / terms:'))
+        self.name_hints = QLineEdit()
+        self.name_hints.setMaxLength(600)
+        self.name_hints.setPlaceholderText('Optional: Seijou, Aoba Johsai — comma-separated spellings to help recognition')
+        names_row.addWidget(self.name_hints, 1)
+        self.exact_replacements = QLineEdit()
+        self.exact_replacements.setMaxLength(1000)
+        self.exact_replacements.setPlaceholderText('Optional: say joe => Seijou; ...')
+        self.exact_replacements.setToolTip('Exact replacements are always applied to matching whole words in newly generated cues. They can change legitimate dialogue too. Separate rules with semicolons.')
+        names_row.addWidget(QLabel('Always replace:'))
+        names_row.addWidget(self.exact_replacements, 1)
+        self.context_preset.activated.connect(self.apply_context_preset)
         self.progress_label = QLabel('Choose a video in step 1 to enable transcription, or import an SRT in step 3.')
         self.progress_label.setWordWrap(True)
         self.progress_bar = QProgressBar()
@@ -163,7 +192,7 @@ class MainWindow(PlaybackTools, EditingSafety, QMainWindow):
             text = 'Ready offline: bundled model found. No account, internet or model download needed.'
         else:
             text = 'Uses a cached model if available. If missing, enable the one-time download below. The Offline ZIP includes Base English.'
-        self.model_hint.setText(text + ' Choose the English dub in the audio-track selector above.')
+        self.model_hint.setText(text + ' Choose the English dub above. Speech-aware timing is always on; show context and name hints are optional.')
 
     def refresh_actions(self):
         probing = self.track_probe is not None
@@ -171,6 +200,8 @@ class MainWindow(PlaybackTools, EditingSafety, QMainWindow):
         self.audio_tracks.setEnabled(self.audio_ready and not self.busy and not probing)
         self.model.setEnabled(not self.busy)
         self.allow_download.setEnabled(not self.busy)
+        for widget in (self.context_preset, self.show_context, self.name_hints, self.exact_replacements, self.speaker_changes):
+            widget.setEnabled(not self.busy)
         self.transcribe_button.setEnabled(bool(self.video_path) and self.audio_ready and not self.busy and not probing)
         self.cancel_button.setEnabled(self.busy and not self.cancel_pending and not self.job_terminal)
         for button in (self.import_button, self.add_row_button, self.delete_button):
@@ -198,7 +229,28 @@ class MainWindow(PlaybackTools, EditingSafety, QMainWindow):
         else:
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(value)
-            self.progress_bar.setFormat('Audio position: %p%')
+            self.progress_bar.setFormat('Current phase: %p%')
+
+    def apply_context_preset(self, index):
+        if index == 1:
+            self.show_context.setText('Haikyuu. English dub about volleyball and the Seijou team.')
+            self.name_hints.setText('Seijou, Aoba Johsai')
+        else:
+            self.show_context.clear()
+            self.name_hints.clear()
+
+    def transcription_options(self, validate_replacements=True):
+        return normalize_options({'context': self.show_context.text(), 'names': self.name_hints.text(),
+                                  'replacements': self.exact_replacements.text(),
+                                  'speaker_changes': self.speaker_changes.isChecked()}, validate_replacements=validate_replacements)
+
+    def restore_transcription_options(self, options):
+        options = normalize_options(options, validate_replacements=False)
+        self.context_preset.setCurrentIndex(0)
+        self.show_context.setText(options['context'])
+        self.name_hints.setText(options['names'])
+        self.exact_replacements.setText(options['replacements'])
+        self.speaker_changes.setChecked(options['speaker_changes'])
 
     def transcription_finished(self):
         if self.cancel_pending:
@@ -336,6 +388,11 @@ class MainWindow(PlaybackTools, EditingSafety, QMainWindow):
     def transcribe(self):
         if self.busy:
             return
+        try:
+            options = self.transcription_options()
+        except ValueError as exc:
+            QMessageBox.warning(self, 'Check name replacements', str(exc))
+            return
         self.finish_cell_edit()
         if not self.video_path or not self.audio_ready or self.track_probe is not None:
             QMessageBox.information(self, 'Choose video and audio', 'Choose a video, wait for its audio tracks, then select the English dub track.')
@@ -352,7 +409,7 @@ class MainWindow(PlaybackTools, EditingSafety, QMainWindow):
         self.refresh_actions()
         self.transcription_progress('Starting transcription…', -1)
         self.statusBar().showMessage('Working locally. Loading and audio preparation have no percentage; transcription reports audio position.')
-        self.worker = Transcriber(self.video_path, self.model.currentData(), self.allow_download.isChecked(), self.audio_tracks.currentData())
+        self.worker = Transcriber(self.video_path, self.model.currentData(), self.allow_download.isChecked(), self.audio_tracks.currentData(), options=options)
         self.worker.progress.connect(self.transcription_progress)
         self.worker.completed.connect(self.transcription_complete)
         self.worker.failed.connect(self.transcription_failed)
