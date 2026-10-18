@@ -10,6 +10,9 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtGui import QCloseEvent
 import main
 import model_runtime as runtime
+from transcription_job import run_job
+
+TRACK = dict(index=0, stream_index=0, language="eng", title="English", codec="pcm_s16le", channels=1)
 
 APP = QApplication.instance() or QApplication([])
 
@@ -17,6 +20,10 @@ APP = QApplication.instance() or QApplication([])
 class EditorTests(unittest.TestCase):
     def setUp(self):
         self.recovery_temp = tempfile.TemporaryDirectory()
+        def probe(window, path):
+            window.tracks_found(path, [TRACK])
+        self.probe_patch = patch.object(main.MainWindow, 'start_track_probe', probe)
+        self.probe_patch.start()
         self.window = main.MainWindow(recovery_directory=self.recovery_temp.name, offer_recovery=False)
 
     def tearDown(self):
@@ -25,6 +32,7 @@ class EditorTests(unittest.TestCase):
         self.window.deleteLater()
         APP.processEvents()
         self.recovery_temp.cleanup()
+        self.probe_patch.stop()
 
     def test_initial_guidance_and_actions(self):
         self.assertFalse(self.window.transcribe_button.isEnabled())
@@ -92,6 +100,7 @@ class EditorTests(unittest.TestCase):
 
     def test_busy_locks_inputs_and_close_without_losing_rows(self):
         self.window.video_path = 'example.mp4'
+        self.window.tracks_found('example.mp4', [TRACK])
         self.window.set_rows([(0, 1000, 'Keep')])
         self.window.busy = True
         self.window.worker = Mock(isRunning=lambda: True)
@@ -132,13 +141,14 @@ class TranscriptionTests(unittest.TestCase):
                 raise RuntimeError('Decode failed')
         model = Mock()
         model.transcribe.return_value = (segments(), SimpleNamespace(duration=duration))
-        worker = main.Transcriber('video.mp4', 'base.en')
-        events, completed, failed = [], [], []
-        worker.progress.connect(lambda message, value: events.append((message, value)))
-        worker.completed.connect(completed.append)
-        worker.failed.connect(failed.append)
-        with patch.object(main, 'load_model', return_value=model):
-            worker.run()
+        connection = Mock()
+        messages = []
+        connection.send.side_effect = messages.append
+        with patch('transcription_job.load_model', return_value=model), patch('transcription_job.decode_audio_track', return_value=[]):
+            run_job(connection, 'video.mp4', 'base.en', False, 0)
+        events = [(m[1], m[2]) for m in messages if m[0] == 'progress']
+        completed = [m[1] for m in messages if m[0] == 'completed']
+        failed = [m[1] for m in messages if m[0] == 'failed']
         return events, completed, failed
 
     def test_real_segment_positions_monotonic_clamped_below_complete(self):

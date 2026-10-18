@@ -60,6 +60,7 @@ class EditingSafety:
         return tuple(tuple(self.table.item(row, col).text() if self.table.item(row, col) else '' for col in range(3)) for row in range(self.table.rowCount()))
 
     def apply_cells(self, rows, cursor=None):
+        self.stop_replay()
         self.table.blockSignals(True)
         try:
             self.table.setRowCount(len(rows))
@@ -83,7 +84,7 @@ class EditingSafety:
 
     def document_changed(self):
         self.recovery_saved = False
-        self.setWindowTitle('Dubtitler v0.2.1 — English Dub Subtitle Editor' + (' *' if self.dirty else ''))
+        self.setWindowTitle('Dubtitler v0.3.0 — English Dub Subtitle Editor' + (' *' if self.dirty else ''))
         if self.dirty:
             self.save_status.setText('Unsaved edits · saving recovery…')
             self.autosave_timer.start()
@@ -128,7 +129,7 @@ class EditingSafety:
                 if not lock.tryLock(0):
                     raise OSError('Recovery file is in use')
                 self.recovery_lock = lock
-            write_snapshot(self.recovery_path, {'version': 1, 'video_path': self.video_path, 'srt_path': self.srt_path, 'rows': self._last_rows, 'saved_rows': self._saved_rows})
+            write_snapshot(self.recovery_path, {'version': 1, 'video_path': self.video_path, 'srt_path': self.srt_path, 'audio_index': self.audio_tracks.currentData(), 'rows': self._last_rows, 'saved_rows': self._saved_rows})
             self.recovery_saved = True
             self.save_status.setText('Unsaved edits · recovery saved')
         except OSError as exc:
@@ -148,7 +149,7 @@ class EditingSafety:
         return box.exec()
 
     def offer_recovery(self):
-        if self.dirty or self.busy:
+        if self.dirty or self.busy or self.track_probe is not None:
             return
         directory = self.recovery_path.parent
         try:
@@ -176,11 +177,7 @@ class EditingSafety:
                 adopted = True
                 self.video_path, self.srt_path = data.get('video_path'), data.get('srt_path')
                 if self.video_path:
-                    from PySide6.QtCore import QUrl
-                    self.video_label.setText(Path(self.video_path).name)
-                    self.video_label.setToolTip(self.video_path)
-                    if Path(self.video_path).is_file():
-                        self.player.setSource(QUrl.fromLocalFile(self.video_path))
+                    self.load_video(self.video_path, data.get('audio_index'))
                 self.undo_stack.clear()
                 self._saved_rows = tuple(tuple(row) for row in data['saved_rows'])
                 self.apply_cells(data['rows'])
