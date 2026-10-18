@@ -144,7 +144,7 @@ class TranscriptionTests(unittest.TestCase):
         connection = Mock()
         messages = []
         connection.send.side_effect = messages.append
-        with patch('transcription_job.load_model', return_value=model), patch('transcription_job.decode_audio_track', return_value=[]):
+        with patch('transcription_job.load_model', return_value=model), patch('transcription_job.decode_audio_track', return_value=[]), patch('transcription_job.detect_speech', return_value=[(0, 200)]), patch('transcription_job.detect_speaker_turns', return_value=[]):
             run_job(connection, 'video.mp4', 'base.en', False, 0)
         events = [(m[1], m[2]) for m in messages if m[0] == 'progress']
         completed = [m[1] for m in messages if m[0] == 'completed']

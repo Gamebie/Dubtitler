@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
-    tags: ['v0.3.0']
+    tags: ['v0.4.0']
 permissions:
   contents: read
 jobs:
@@ -29,19 +29,21 @@ jobs:
         run: >-
           pyinstaller --noconfirm --clean --windowed --onedir --name Dubtitler
           --collect-all faster_whisper --collect-all ctranslate2
-          --collect-all tokenizers --collect-all onnxruntime main.py
+          --collect-all tokenizers --collect-all onnxruntime
+          --collect-all sherpa_onnx main.py
       - name: Bundle pinned offline English model and instructions
         run: |
           python scripts/bundle_model.py dist/Dubtitler
+          python scripts/bundle_speakers.py dist/Dubtitler
           python scripts/collect_licenses.py dist/Dubtitler
           Copy-Item README.md dist/Dubtitler/README.md
           Copy-Item THIRD_PARTY_NOTICES.md dist/Dubtitler/THIRD_PARTY_NOTICES.md
       - name: Package portable ZIP
-        run: Compress-Archive -Path dist/Dubtitler -DestinationPath Dubtitler-v0.3.0-Windows-Offline-Portable.zip
+        run: Compress-Archive -Path dist/Dubtitler -DestinationPath Dubtitler-v0.4.0-Windows-Offline-Portable.zip
       - name: Test extracted portable offline with empty caches
         shell: pwsh
         run: |
-          Expand-Archive Dubtitler-v0.3.0-Windows-Offline-Portable.zip -DestinationPath portable-check
+          Expand-Archive Dubtitler-v0.4.0-Windows-Offline-Portable.zip -DestinationPath portable-check
           $env:HF_HOME = "$env:RUNNER_TEMP/dubtitler-empty-hf"
           $env:DUBTITLER_MODEL_CACHE = "$env:RUNNER_TEMP/dubtitler-empty-cache"
           $env:HF_HUB_OFFLINE = '1'
@@ -59,8 +61,8 @@ jobs:
       - name: Upload portable artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Dubtitler-v0.3.0-Windows-Offline-Portable
-          path: Dubtitler-v0.3.0-Windows-Offline-Portable.zip
+          name: Dubtitler-v0.4.0-Windows-Offline-Portable
+          path: Dubtitler-v0.4.0-Windows-Offline-Portable.zip
           if-no-files-found: error
       - name: Upload validation result
         if: always()
@@ -70,7 +72,7 @@ jobs:
           path: portable-smoke.json
           if-no-files-found: warn
   release:
-    if: github.ref == 'refs/tags/v0.3.0'
+    if: github.ref == 'refs/tags/v0.4.0'
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -78,7 +80,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: Dubtitler-v0.3.0-Windows-Offline-Portable
+          name: Dubtitler-v0.4.0-Windows-Offline-Portable
           path: release
       - uses: softprops/action-gh-release@v2
         with:
@@ -86,7 +88,7 @@ jobs:
           generate_release_notes: true
           body: |
             Download the Windows Offline Portable ZIP, extract the whole folder, and run Dubtitler.exe.
-            Includes the Base English model. No Python, model download, account, or installation required.
-            Other models require a one-time download. No installer variant is published for v0.2.
+            Includes Base English and offline neural speaker models. No Python, model download, account, or installation required.
+            Other transcription models require a one-time download. No installer variant is published for v0.4.
           files: release/*.zip
           fail_on_unmatched_files: true

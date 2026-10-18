@@ -1,11 +1,11 @@
-# Dubtitler v0.3.0
+# Dubtitler v0.4.0
 
 A local Windows app for creating, editing, and exporting English dub subtitles.
 
 ## Use the offline portable app (recommended)
 
-1. Download **Dubtitler-v0.3.0-Windows-Offline-Portable.zip** from a successful
-   Actions build, or from the v0.3.0 preview release when published.
+1. Download **Dubtitler-v0.4.0-Windows-Offline-Portable.zip** from a successful
+   Actions build, or from the v0.4.0 preview release when published.
 2. Right-click the ZIP and **Extract All**. Keep the entire `Dubtitler` folder,
    including `_internal` and `models`. Run `Dubtitler.exe` inside that folder.
    No installer, Python installation, account, or model download is needed.
@@ -18,11 +18,43 @@ A local Windows app for creating, editing, and exporting English dub subtitles.
    **Export SRT** and save beside your video. Import SRT also works without a video.
 
 The portable ZIP includes one English-only `base.en` model (about 148 MB before
-compression). Other models remain optional. There is **no installer artifact in
-the v0.2 workflow**; old v0.1 installer/portable downloads do not include this model.
+compression), plus neural speaker models (about 35 MB). Other transcription models remain optional. There is **no installer artifact in
+the v0.4 workflow**; old v0.1 installer/portable downloads do not include this model.
 The old Inno Setup script is retained only as a legacy build reference.
 
-## Audio, cancellation and replay (v0.3.0)
+## Speech timing, voice changes and names (v0.4.0)
+
+- Recognition now aligns individual words. New cues start at detected speech
+  regions, pauses of 350 ms or more between words, detected speaker changes,
+  and readability limits of 6 seconds / 84 characters. Cues end at the final
+  aligned word rather than staying visible until the next line. Speech detection
+  uses 250 ms minimum quiet gaps and 80 ms boundary padding. These are model
+  estimates, not sample-accurate boundaries; very short pauses may stay in a cue.
+- **Split at voice changes** uses offline pyannote segmentation and WeSpeaker
+  CAM++ embeddings through sherpa-onnx. It adds analysis time before recognition.
+  It starts a new subtitle for an estimated speaker turn, without guessing a
+  character's name or adding speaker labels to your dialogue/SRT. Overlapping
+  voices, shouting, music and short replies can cause missed or false changes.
+  Turn it off to use speech/word timing without speaker analysis. Missing or
+  damaged speaker models produce a clear error; they never download silently.
+- Choose **Haikyuu — Seijou**, or enter the show's context and comma-separated
+  **Names / terms** yourself. These hints bias recognition toward spellings such
+  as **Seijou** rather than “say Joe.” They are optional and may still be wrong.
+  This version transcribes English dub audio; it does not translate Japanese.
+- **Always replace** is an optional explicit correction list, for example
+  `say joe => Seijou; other heard spelling => Correct Name`. Matching is literal,
+  case-insensitive and uses whole-word boundaries within a generated cue. These
+  rules always apply, so add only errors you want replaced even when those words
+  could be legitimate dialogue. The preset supplies hints, with no automatic
+  replacement rules. Importing or editing an SRT does not apply these rules.
+- Generated subtitles remain one undoable replacement, with all existing editing,
+  replay, cancellation, recovery and SRT features. Recovery snapshots also retain
+  the context/name settings present when the recovery copy was saved.
+
+The extra speaker weights occupy about 35 MB before ZIP compression and include
+source URLs, licenses and pinned SHA-256 hashes. See `SPEAKER_MODEL_NOTICES.md`.
+
+## Audio, cancellation and replay (introduced in v0.3.0)
 
 - The audio selector lists every audio stream with language, codec, channel count
   and title where available. English tags are preferred, avoiding commentary when
@@ -74,13 +106,15 @@ The old Inno Setup script is retained only as a legacy build reference.
 
 ## Transcription progress and recovery
 
+- Voice-change analysis reports processed analysis windows / total windows for that
+  phase. Clustering and final subtitle assembly stay indeterminate.
 - Model lookup/loading, optional downloading, and audio preparation/speech
   detection show an **indeterminate** bar: their APIs do not supply a reliable total.
 - Transcription shows **audio position reached / full audio duration**, based on
   generated segment timestamps restored to the original video timeline after VAD.
   This is not elapsed time, remaining time, or a percentage of CPU work. Long
   silence can cause jumps or pauses. Unknown duration stays indeterminate.
-- The bar stays below 100% until all segments finish and the subtitle list is ready.
+- Each measured phase stays below 100%; only the finished subtitle list shows completion.
   Silence completes with a clear no-speech message.
 - While transcribing, changing video/audio/model and subtitle editing are disabled.
   Cancel the job or wait for it to finish before closing. A failed job keeps existing subtitles
@@ -118,6 +152,7 @@ To prepare the offline model beside `main.py` once (internet required):
 
 ```powershell
 python scripts/bundle_model.py .
+python scripts/bundle_speakers.py .
 ```
 
 Transcription uses PyAV's bundled FFmpeg libraries, so a separate `ffmpeg.exe`
@@ -130,20 +165,22 @@ and does not translate non-English audio.
 ```powershell
 pip install -r requirements-build.txt
 python -m unittest discover -s tests -v
-pyinstaller --noconfirm --clean --windowed --onedir --name Dubtitler --collect-all faster_whisper --collect-all ctranslate2 --collect-all tokenizers --collect-all onnxruntime main.py
+pyinstaller --noconfirm --clean --windowed --onedir --name Dubtitler --collect-all faster_whisper --collect-all ctranslate2 --collect-all tokenizers --collect-all onnxruntime --collect-all sherpa_onnx main.py
 python scripts/bundle_model.py dist/Dubtitler
+python scripts/bundle_speakers.py dist/Dubtitler
 python scripts/collect_licenses.py dist/Dubtitler
 Copy-Item README.md,THIRD_PARTY_NOTICES.md dist/Dubtitler/
-Compress-Archive -Path dist/Dubtitler -DestinationPath Dubtitler-v0.3.0-Windows-Offline-Portable.zip
+Compress-Archive -Path dist/Dubtitler -DestinationPath Dubtitler-v0.4.0-Windows-Offline-Portable.zip
 ```
 
 The workflow builds on pull requests, main pushes, and manual runs. It tests the
 extracted ZIP with empty model caches, Hugging Face offline mode, and Python
 socket connections blocked. Its frozen-app smoke test opens Qt, verifies the
-model manifest, selects the English track of a generated dual-track video, checks
+model manifests, runs the offline neural speaker detector on silence, checks word-level
+voice/silence splitting and context rules, selects the English track of a generated dual-track video, checks
 replay/loop control, spawns a real transcription process, cancels and restarts it,
 loads the bundled model, runs VAD on silence, and exercises the decoder. It
-uploads the portable only after that test passes. A `v0.3.0` tag
+uploads the portable only after that test passes. A `v0.4.0` tag
 publishes a preview release after the build passes; ordinary pushes do not
 rewrite an existing release. CI does not replace manual playback and real-video
 quality testing on another Windows PC.

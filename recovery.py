@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from transcription_options import normalize_options
 
 
 def recovery_directory():
@@ -23,6 +24,8 @@ def read_snapshot(path):
             raise ValueError('Invalid recovery file path')
     if data.get('audio_index') is not None and (type(data['audio_index']) is not int or data['audio_index'] < 0):
         raise ValueError('Invalid recovery audio track')
+    if 'transcription_options' in data:
+        data['transcription_options'] = normalize_options(data['transcription_options'], validate_replacements=False)
     return data
 
 

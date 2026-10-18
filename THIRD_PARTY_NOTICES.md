@@ -32,6 +32,11 @@ SOFTWARE.
 
 ## Runtime libraries
 
+The v0.4 portable also includes pyannote segmentation (MIT) and WeSpeaker CAM++
+VoxCeleb speaker embeddings (CC BY 4.0), with attribution, source URLs and license
+links in `models/speakers/NOTICES.md` (source: `SPEAKER_MODEL_NOTICES.md`). Their
+SHA-256 hashes are pinned in `speaker_runtime.py` and the packaged manifest.
+
 The portable runtime also contains PySide6/Qt, faster-whisper, CTranslate2,
 PyAV/FFmpeg libraries, ONNX Runtime, tokenizers, and their dependencies.
 Their installed license/notice files and a package inventory are copied to the
@@ -43,3 +48,4 @@ Their installed license/notice files and a package inventory are copied to the
 - https://github.com/PyAV-Org/PyAV (BSD; linked FFmpeg libraries use LGPL/GPL)
 - https://github.com/microsoft/onnxruntime (MIT)
 - https://github.com/huggingface/tokenizers (Apache-2.0)
+- https://github.com/k2-fsa/sherpa-onnx (Apache-2.0)

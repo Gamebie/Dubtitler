@@ -115,6 +115,17 @@ def run(args):
         for name, expected in manifest['sha256'].items():
             assert hashlib.sha256((path / name).read_bytes()).hexdigest() == expected, name
         model = load_model(DEFAULT_MODEL, lambda *_: None, allow_download=False)
+        from speaker_runtime import detect_speaker_turns
+        from subtitle_timing import make_cues
+        from types import SimpleNamespace as NS
+        assert detect_speaker_turns(np.zeros(32000, dtype=np.float32), lambda *_: None) == []
+        aligned = [NS(words=[NS(start=.1, end=.5, word=' Ready?'), NS(start=.6, end=1, word=' Yes!')])]
+        assert len(make_cues(aligned, [(0, 1.1)], [(0, .55, 0), (.55, 1.1, 1)])) == 2
+        assert len(make_cues(aligned, [(0, .5), (.6, 1.1)])) == 2
+        from transcription_options import normalize_options, correct_text, recognition_hints
+        options = normalize_options({'context': 'Haikyuu', 'names': 'Seijou', 'replacements': 'say joe => Seijou'})
+        assert correct_text('Say Joe!', options) == 'Seijou!'
+        assert recognition_hints(options)['hotwords'] == 'Seijou'
         # Use a file, not just an array: this also tests bundled PyAV/FFmpeg.
         with tempfile.TemporaryDirectory() as temp:
             silence_path = str(Path(temp) / 'silence.wav')
@@ -126,13 +137,14 @@ def run(args):
         # Exercise decoding as well as the VAD no-speech path.
         segments, _ = model.transcribe(np.zeros(16000, dtype=np.float32), language='en', vad_filter=False)
         list(segments)
-        result.update(ok=True, model=str(path), revision=manifest['revision'], silence=True, audio_selection=True, replay_loop=True, process_transcription=True, cancellation=True)
+        result.update(ok=True, model=str(path), revision=manifest['revision'], silence=True, audio_selection=True, replay_loop=True, process_transcription=True, cancellation=True, speaker_inference=True, word_timing=True, name_context=True)
         if len(args) > 1:
-            segments, _ = model.transcribe(args[1], language='en', vad_filter=True)
-            text = ' '.join(s.text.strip() for s in segments)
+            completed = worker_check(args[1], 0)[0]
+            text = ' '.join(row[2] for row in completed)
             if not text:
                 raise RuntimeError('Speech fixture produced no transcription')
             result['speech_text'] = text
+            result['speech_cues'] = completed
     except Exception:
         result.update(ok=False, error=traceback.format_exc())
     result_path.write_text(json.dumps(result, indent=2), encoding='utf-8')
