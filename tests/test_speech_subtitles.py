@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 from subtitle_timing import make_cues
 from transcription_options import normalize_options, recognition_hints, correct_text
 from transcription_job import run_job
-from speaker_runtime import load_speakers
+from speaker_runtime import load_speakers, detect_speaker_turns
 from recovery import read_snapshot
 from PySide6.QtWidgets import QApplication, QMessageBox
 from main import MainWindow
@@ -84,6 +84,19 @@ class HintsTests(unittest.TestCase):
 
 
 class JobTests(unittest.TestCase):
+    def test_speaker_progress_returns_to_indeterminate_for_unmeasured_matching(self):
+        detector = Mock(sample_rate=16000)
+        detector.process.return_value.sort_by_start_time.return_value = []
+        def process(audio, callback):
+            for done, total in ((0, 0), (1, 4), (2, 4), (4, 4)):
+                self.assertEqual(callback(done, total), 0)
+            return detector.process.return_value
+        detector.process.side_effect = process
+        phase = Mock()
+        with patch('speaker_runtime.load_speakers', return_value=detector):
+            self.assertEqual(detect_speaker_turns([], phase), [])
+        self.assertEqual([call.args[1] for call in phase.call_args_list], [-1, -1, 25, 50, -1])
+
     def job(self, speech, options=None, turns=()):
         model, connection = Mock(), Mock()
         model.transcribe.return_value = ([segment((1, 1.4, ' Say'), (1.4, 1.8, ' Joe'))], NS(duration=3))

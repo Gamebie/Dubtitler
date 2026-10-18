@@ -42,9 +42,11 @@ def detect_speaker_turns(audio, phase):
         raise RuntimeError('Speaker model sample rate must be 16000 Hz.')
 
     def progress(done, total):
-        phase(f'Detecting voice changes — {done} / {total} analysis windows', min(99, int(100 * done / total)) if total else -1)
+        if total and done >= total:
+            phase('Finishing voice analysis and matching speakers…', -1)
+        else:
+            phase(f'Detecting voice changes — {done} / {total} analysis windows', min(99, int(100 * done / total)) if total else -1)
         return 0
 
     result = detector.process(audio, callback=progress)
-    phase('Grouping voices into speaker turns…', -1)
     return [(turn.start, turn.end, turn.speaker) for turn in result.sort_by_start_time()]
