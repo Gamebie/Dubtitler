@@ -1,63 +1,92 @@
-name: Build and Publish Windows Installer
+name: Build Windows Offline Portable
 on:
   workflow_dispatch:
+  pull_request:
   push:
     branches: [main]
-    paths:
-      - 'main.py'
-      - 'requirements.txt'
-      - 'installer/**'
-      - '.github/workflows/windows-installer.yml'
+    tags: ['v0.2.0']
+permissions:
+  contents: read
 jobs:
   build:
     runs-on: windows-latest
-    permissions:
-      contents: write
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
+          cache: pip
       - name: Install dependencies
-        shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
+          pip install -r requirements.txt -r requirements-build.txt
+      - name: Test UI, progress, model discovery and SRT editing
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s tests -v
       - name: Build standalone app
-        shell: pwsh
+        run: >-
+          pyinstaller --noconfirm --clean --windowed --onedir --name Dubtitler
+          --collect-all faster_whisper --collect-all ctranslate2
+          --collect-all tokenizers --collect-all onnxruntime main.py
+      - name: Bundle pinned offline English model and instructions
         run: |
-          pyinstaller --noconfirm --clean --windowed --onedir --name Dubtitler --collect-all faster_whisper --collect-all ctranslate2 --collect-all tokenizers main.py
+          python scripts/bundle_model.py dist/Dubtitler
+          python scripts/collect_licenses.py dist/Dubtitler
+          Copy-Item README.md dist/Dubtitler/README.md
+          Copy-Item THIRD_PARTY_NOTICES.md dist/Dubtitler/THIRD_PARTY_NOTICES.md
       - name: Package portable ZIP
+        run: Compress-Archive -Path dist/Dubtitler -DestinationPath Dubtitler-v0.2.0-Windows-Offline-Portable.zip
+      - name: Test extracted portable offline with empty caches
         shell: pwsh
         run: |
-          Compress-Archive -Path "dist/Dubtitler/*" -DestinationPath "Dubtitler-Portable.zip" -Force
+          Expand-Archive Dubtitler-v0.2.0-Windows-Offline-Portable.zip -DestinationPath portable-check
+          $env:HF_HOME = "$env:RUNNER_TEMP/dubtitler-empty-hf"
+          $env:DUBTITLER_MODEL_CACHE = "$env:RUNNER_TEMP/dubtitler-empty-cache"
+          $env:HF_HUB_OFFLINE = '1'
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          $result = Join-Path $PWD 'portable-smoke.json'
+          $process = Start-Process -FilePath 'portable-check/Dubtitler/Dubtitler.exe' -ArgumentList '--smoke-test', "`"$result`"" -PassThru -WindowStyle Hidden
+          if (-not $process.WaitForExit(180000)) {
+            $process.Kill()
+            throw 'Portable smoke test timed out'
+          }
+          if ($process.ExitCode -ne 0) { throw "Portable smoke test failed: $($process.ExitCode)" }
+          if (-not (Test-Path $result)) { throw 'Portable smoke test did not write a result' }
+          Get-Content $result
+          if (-not (Get-Content $result -Raw | ConvertFrom-Json).ok) { throw 'Portable smoke test failed' }
       - name: Upload portable artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Dubtitler-Portable
-          path: Dubtitler-Portable.zip
+          name: Dubtitler-v0.2.0-Windows-Offline-Portable
+          path: Dubtitler-v0.2.0-Windows-Offline-Portable.zip
           if-no-files-found: error
-      - name: Install Inno Setup
-        shell: pwsh
-        run: choco install innosetup --yes --no-progress
-      - name: Create installer
-        shell: pwsh
-        run: |
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "installer\Dubtitler.iss"
-      - name: Upload build artifact
+      - name: Upload validation result
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Dubtitler-Windows-Installer
-          path: installer/output/Dubtitler-Setup.exe
-          if-no-files-found: error
-      - name: Publish installer to GitHub Releases
-        uses: softprops/action-gh-release@v2
+          name: portable-smoke-result
+          path: portable-smoke.json
+          if-no-files-found: warn
+  release:
+    if: github.ref == 'refs/tags/v0.2.0'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
         with:
-          tag_name: v0.1.0
-          name: Dubtitler v0.1.0 (Preview)
+          name: Dubtitler-v0.2.0-Windows-Offline-Portable
+          path: release
+      - uses: softprops/action-gh-release@v2
+        with:
           prerelease: true
           generate_release_notes: true
-          files: |
-            installer/output/Dubtitler-Setup.exe
-            Dubtitler-Portable.zip
+          body: |
+            Download the Windows Offline Portable ZIP, extract the whole folder, and run Dubtitler.exe.
+            Includes the Base English model. No Python, model download, account, or installation required.
+            Other models require a one-time download. No installer variant is published for v0.2.
+          files: release/*.zip
           fail_on_unmatched_files: true
