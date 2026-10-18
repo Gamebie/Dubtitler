@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from model_runtime import DEFAULT_MODEL, bundled_model, load_model
+from editing import EditingSafety
 
 
 def timestamp(ms):
@@ -71,10 +72,10 @@ class Transcriber(QThread):
             self.failed.emit(str(exc))
 
 
-class MainWindow(QMainWindow):
-    def __init__(self):
+class MainWindow(EditingSafety, QMainWindow):
+    def __init__(self, recovery_directory=None, offer_recovery=True):
         super().__init__()
-        self.setWindowTitle('Dubtitler v0.2 — English Dub Subtitle Editor')
+        self.setWindowTitle('Dubtitler v0.2.1 — English Dub Subtitle Editor')
         self.resize(1200, 850)
         self.video_path = None
         self.busy = False
@@ -176,6 +177,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet('QMainWindow,QWidget{background:#242733;color:#eaeaea;} QPushButton{background:#414a65;border:0;border-radius:5px;padding:8px;} QPushButton:hover{background:#576789;} QTableWidget{background:#20232e;alternate-background-color:#2b3040;gridline-color:#424858;} QHeaderView::section{background:#353b4e;color:white;padding:5px;} QComboBox{background:#353b4e;padding:5px;}')
         self.setStyleSheet(self.styleSheet() + ' QPushButton:disabled{background:#303441;color:#858a99;} QGroupBox{margin-top:12px;padding-top:8px;} QProgressBar{text-align:center;} QProgressBar::chunk{background:#526ea3;}')
         self.statusBar().showMessage('Ready')
+        self.init_editing(row_controls, recovery_directory, offer_recovery)
         self.refresh_actions()
 
     def update_model_hint(self):
@@ -193,14 +195,15 @@ class MainWindow(QMainWindow):
         self.transcribe_button.setEnabled(bool(self.video_path) and not self.busy)
         for button in (self.import_button, self.add_row_button, self.delete_button):
             button.setEnabled(not self.busy)
-        self.export_button.setEnabled(self.table.rowCount() > 0 and not self.busy)
+        self.export_button.setEnabled((self.table.rowCount() > 0 or self.dirty) and not self.busy)
         self.table.setEnabled(not self.busy)
+        self.undo_action.setEnabled(not self.busy and self.undo_stack.canUndo())
+        self.redo_action.setEnabled(not self.busy and self.undo_stack.canRedo())
         for widget in (self.play_button, self.back_button, self.forward_button, self.seek):
             widget.setEnabled(bool(self.video_path))
 
-    def editor_changed(self, *_):
-        self.update_caption(self.player.position())
-        self.refresh_actions()
+    def editor_changed(self, item):
+        self.change_cells(self.raw_cells(), 'Edit subtitle', (item.row(), item.column()))
 
     def transcription_progress(self, message, value):
         self.progress_label.setText(message)
@@ -216,10 +219,14 @@ class MainWindow(QMainWindow):
         self.refresh_actions()
 
     def closeEvent(self, event):
-        if self.worker is not None and self.worker.isRunning():
+        if self.busy or (self.worker is not None and self.worker.isRunning()):
             QMessageBox.information(self, 'Transcription in progress', 'Wait for transcription to finish before closing Dubtitler.')
             event.ignore()
             return
+        if not self.confirm_unsaved('close Dubtitler'):
+            event.ignore()
+            return
+        self.finish_editing()
         super().closeEvent(event)
 
     def add_button(self, layout, label, callback):
@@ -231,12 +238,20 @@ class MainWindow(QMainWindow):
     def open_video(self):
         if self.busy:
             return
+        self.finish_cell_edit()
         path, _ = QFileDialog.getOpenFileName(self, 'Choose a video with English audio', '', 'Video (*.mp4 *.mkv *.mov *.avi *.webm);;All files (*)')
         if path:
             if self.table.rowCount():
-                if QMessageBox.question(self, 'Choose another video?', 'Current subtitles belong to the previous video. Clear them and continue? Export them first if needed.') != QMessageBox.Yes:
+                if self.dirty:
+                    proceed = self.confirm_unsaved('choose another video and clear these subtitles')
+                else:
+                    proceed = QMessageBox.question(self, 'Choose another video?', 'Clear current subtitles and choose another video?') == QMessageBox.Yes
+                if not proceed:
                     return
-                self.set_rows([])
+            elif not self.confirm_unsaved('choose another video'):
+                return
+            self.set_rows([], clean=True)
+            self.srt_path = None
             self.video_path = path
             self.video_label.setText(Path(path).name)
             self.video_label.setToolTip(path)
@@ -254,17 +269,11 @@ class MainWindow(QMainWindow):
         else:
             self.player.play()
 
-    def set_rows(self, rows):
-        self.table.blockSignals(True)
-        self.table.setRowCount(0)
-        for start, end, text in rows:
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            for col, value in enumerate((timestamp(start), timestamp(end), text)):
-                self.table.setItem(row, col, QTableWidgetItem(value))
-        self.table.blockSignals(False)
-        self.update_caption(self.player.position())
-        self.refresh_actions()
+    def set_rows(self, rows, clean=False):
+        cells = tuple((timestamp(start), timestamp(end), text) for start, end, text in rows)
+        self.undo_stack.clear()
+        self._saved_rows = cells if clean else ()
+        self.apply_cells(cells)
 
     def get_rows(self):
         rows = []
@@ -278,18 +287,13 @@ class MainWindow(QMainWindow):
 
     def add_row(self):
         pos = self.player.position()
-        row = self.table.rowCount()
-        self.table.insertRow(row)
-        for col, value in enumerate((timestamp(pos), timestamp(pos + 2000), 'New subtitle')):
-            self.table.setItem(row, col, QTableWidgetItem(value))
+        row = len(self._last_rows)
+        self.change_cells((*self._last_rows, (timestamp(pos), timestamp(pos + 2000), 'New subtitle')), 'Add subtitle', (row, 2))
         self.table.selectRow(row)
 
     def delete_row(self):
-        rows = sorted({index.row() for index in self.table.selectedIndexes()}, reverse=True)
-        for row in rows:
-            self.table.removeRow(row)
-        self.update_caption(self.player.position())
-        self.refresh_actions()
+        rows = {index.row() for index in self.table.selectedIndexes()}
+        self.change_cells([cells for index, cells in enumerate(self._last_rows) if index not in rows], 'Delete subtitles', (min(rows), 0) if rows else None)
 
     def jump_to_selection(self):
         row = self.table.currentRow()
@@ -319,10 +323,14 @@ class MainWindow(QMainWindow):
     def transcribe(self):
         if self.busy:
             return
+        self.finish_cell_edit()
         if not self.video_path:
             QMessageBox.information(self, 'No video', 'Open a video first.')
             return
-        if self.table.rowCount() and QMessageBox.question(self, 'Replace subtitles?', 'Transcription will replace current subtitles. Continue?') != QMessageBox.Yes:
+        if self.dirty:
+            if not self.confirm_unsaved('replace these subtitles with a new transcription'):
+                return
+        elif self.table.rowCount() and QMessageBox.question(self, 'Replace subtitles?', 'Transcription will replace current subtitles. Continue?') != QMessageBox.Yes:
             return
         self.busy = True
         self.refresh_actions()
@@ -336,7 +344,7 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def transcription_complete(self, rows):
-        self.set_rows(rows)
+        self.change_cells([(timestamp(start), timestamp(end), text) for start, end, text in rows], 'Replace with transcription')
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
         self.progress_bar.setFormat('Complete')
@@ -352,6 +360,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage('Transcription failed')
 
     def import_srt(self):
+        self.finish_cell_edit()
         path, _ = QFileDialog.getOpenFileName(self, 'Import subtitles', '', 'SubRip (*.srt)')
         if not path:
             return
@@ -365,29 +374,51 @@ class MainWindow(QMainWindow):
                     continue
                 start, end = [part.strip() for part in lines[timing_idx].split('-->', 1)]
                 rows.append((parse_timestamp(start), parse_timestamp(end), '\n'.join(lines[timing_idx+1:])))
-            self.set_rows(rows)
+            if not rows:
+                raise ValueError('No subtitle cues found. Existing subtitles were kept.')
+            if any(end <= start for start, end, _ in rows):
+                raise ValueError('Subtitle end must be after start. Existing subtitles were kept.')
+            if not self.confirm_unsaved('import another SRT and replace these subtitles'):
+                return
+            self.srt_path = path
+            self.set_rows(rows, clean=True)
             self.statusBar().showMessage(f'Imported {len(rows)} subtitles')
         except Exception as exc:
             QMessageBox.warning(self, 'Import error', str(exc))
 
     def export_srt(self):
+        self.finish_cell_edit()
         try:
             rows = self.get_rows()
-            if not rows:
+            if not rows and not self.dirty:
                 QMessageBox.information(self, 'Nothing to export', 'Create or import subtitles first.')
-                return
+                return False
         except ValueError as exc:
             QMessageBox.warning(self, 'Invalid subtitle timing', str(exc))
-            return
-        path, _ = QFileDialog.getSaveFileName(self, 'Export subtitles', str(Path(self.video_path).with_suffix('.srt')) if self.video_path else 'subtitles.srt', 'SubRip (*.srt)')
+            return False
+        default_path = self.srt_path or (str(Path(self.video_path).with_suffix('.srt')) if self.video_path else 'subtitles.srt')
+        path, _ = QFileDialog.getSaveFileName(self, 'Export subtitles', default_path, 'SubRip (*.srt)')
         if path:
             blocks = [f'{i}\n{timestamp(start)} --> {timestamp(end)}\n{text}' for i, (start, end, text) in enumerate(rows, 1)]
             try:
-                Path(path).write_text('\n\n'.join(blocks) + '\n', encoding='utf-8-sig')
+                from PySide6.QtCore import QSaveFile, QIODevice
+                output = QSaveFile(path)
+                if not output.open(QIODevice.WriteOnly):
+                    raise OSError(output.errorString())
+                content = ('\n\n'.join(blocks) + ('\n' if blocks else '')).encode('utf-8-sig')
+                if output.write(content) != len(content):
+                    output.cancelWriting()
+                    raise OSError(output.errorString())
+                if not output.commit():
+                    raise OSError(output.errorString())
             except OSError as exc:
                 QMessageBox.warning(self, 'Export error', str(exc))
-                return
+                return False
+            self.srt_path = path
+            self.mark_saved()
             self.statusBar().showMessage(f'Exported {len(rows)} subtitles to {path}')
+            return True
+        return False
 
 
 if __name__ == '__main__':

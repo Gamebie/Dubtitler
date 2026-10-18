@@ -1,11 +1,11 @@
-# Dubtitler v0.2
+# Dubtitler v0.2.1
 
 A local Windows app for creating, editing, and exporting English dub subtitles.
 
 ## Use the offline portable app (recommended)
 
-1. Download **Dubtitler-v0.2.0-Windows-Offline-Portable.zip** from a successful
-   Actions build, or from the v0.2.0 preview release when published.
+1. Download **Dubtitler-v0.2.1-Windows-Offline-Portable.zip** from a successful
+   Actions build, or from the v0.2.1 preview release when published.
 2. Right-click the ZIP and **Extract All**. Keep the entire `Dubtitler` folder,
    including `_internal` and `models`. Run `Dubtitler.exe` inside that folder.
    No installer, Python installation, account, or model download is needed.
@@ -22,7 +22,31 @@ compression). Other models remain optional. There is **no installer artifact in
 the v0.2 workflow**; old v0.1 installer/portable downloads do not include this model.
 The old Inno Setup script is retained only as a legacy build reference.
 
-## Progress and recovery
+## Editing safety (v0.2.1)
+
+- **Undo / Redo** buttons and the Edit menu cover committed text/timing edits,
+  add/delete operations, and replacement by transcription. Use Ctrl+Z to undo
+  and Ctrl+Y or Ctrl+Shift+Z to redo. Up to 100 operations are retained during a
+  session; starting another video or importing another SRT starts a new history.
+- An asterisk in the title and the status indicator identify unsaved edits.
+  Closing, changing video, importing SRT, or replacing unsaved subtitles offers
+  **Save / Discard / Cancel**. A cancelled or failed export keeps the edits open.
+- Recovery copies are saved after 750 ms of idle time following a committed cell
+  edit, add/delete, or transcription. Finish a cell edit with Enter or click
+  another cell. The status confirms when the recovery copy has been saved.
+  Recovery copies preserve raw text, including temporarily invalid timings.
+- On restart, choose **Recover edits**, **Discard copy**, or **Later**. Recovery
+  restores subtitles and their associated video/SRT paths; undo history begins
+  with the recovered session. Missing videos do not prevent editing/exporting.
+- Recovery lives locally at `%LOCALAPPDATA%\Dubtitler\recovery`, never in the app
+  folder. Each open window owns a separate locked copy. Override the folder with
+  `DUBTITLER_RECOVERY_DIR` if needed. Corrupt copies are kept and reported.
+- Exporting or undoing back to the saved content removes the recovery copy.
+  Choosing Discard on a normal close intentionally removes that window's copy.
+  Recovery is not a replacement for exporting SRT, and cannot preserve text still
+  being typed in a cell when the process crashes or edits from the last 750 ms.
+
+## Transcription progress and recovery
 
 - Model lookup/loading, optional downloading, and audio preparation/speech
   detection show an **indeterminate** bar: their APIs do not supply a reliable total.
@@ -84,14 +108,14 @@ pyinstaller --noconfirm --clean --windowed --onedir --name Dubtitler --collect-a
 python scripts/bundle_model.py dist/Dubtitler
 python scripts/collect_licenses.py dist/Dubtitler
 Copy-Item README.md,THIRD_PARTY_NOTICES.md dist/Dubtitler/
-Compress-Archive -Path dist/Dubtitler -DestinationPath Dubtitler-v0.2.0-Windows-Offline-Portable.zip
+Compress-Archive -Path dist/Dubtitler -DestinationPath Dubtitler-v0.2.1-Windows-Offline-Portable.zip
 ```
 
 The workflow builds on pull requests, main pushes, and manual runs. It tests the
 extracted ZIP with empty model caches, Hugging Face offline mode, and Python
 socket connections blocked. Its frozen-app smoke test opens Qt, verifies the
 model manifest, loads the bundled model, runs VAD on silence, and exercises the
-decoder. It uploads the portable only after that test passes. A `v0.2.0` tag
+decoder. It uploads the portable only after that test passes. A `v0.2.1` tag
 publishes a preview release after the build passes; ordinary pushes do not
 rewrite an existing release. CI does not replace manual playback and real-video
 quality testing on another Windows PC.

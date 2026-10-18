@@ -16,12 +16,15 @@ APP = QApplication.instance() or QApplication([])
 
 class EditorTests(unittest.TestCase):
     def setUp(self):
-        self.window = main.MainWindow()
+        self.recovery_temp = tempfile.TemporaryDirectory()
+        self.window = main.MainWindow(recovery_directory=self.recovery_temp.name, offer_recovery=False)
 
     def tearDown(self):
-        self.window.close()
+        with patch.object(QMessageBox, 'question', return_value=QMessageBox.Discard):
+            self.window.close()
         self.window.deleteLater()
         APP.processEvents()
+        self.recovery_temp.cleanup()
 
     def test_initial_guidance_and_actions(self):
         self.assertFalse(self.window.transcribe_button.isEnabled())
@@ -43,10 +46,10 @@ class EditorTests(unittest.TestCase):
     def test_switch_video_requires_explicit_clear(self):
         self.window.set_rows([(0, 1000, 'Keep me')])
         with patch.object(main.QFileDialog, 'getOpenFileName', return_value=('next.mp4', '')):
-            with patch.object(QMessageBox, 'question', return_value=QMessageBox.No):
+            with patch.object(QMessageBox, 'question', return_value=QMessageBox.Cancel):
                 self.window.open_video()
             self.assertEqual(self.window.get_rows()[0][2], 'Keep me')
-            with patch.object(QMessageBox, 'question', return_value=QMessageBox.Yes):
+            with patch.object(QMessageBox, 'question', return_value=QMessageBox.Discard):
                 self.window.open_video()
         self.assertEqual(self.window.get_rows(), [])
 
@@ -81,7 +84,7 @@ class EditorTests(unittest.TestCase):
     def test_export_write_error_keeps_rows(self):
         self.window.set_rows([(0, 1000, 'Keep')])
         with patch.object(main.QFileDialog, 'getSaveFileName', return_value=('x.srt', '')):
-            with patch.object(Path, 'write_text', side_effect=PermissionError('Read only')):
+            with patch('PySide6.QtCore.QSaveFile.open', return_value=False):
                 with patch.object(QMessageBox, 'warning') as warning:
                     self.window.export_srt()
                     warning.assert_called_once()
