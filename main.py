@@ -2,6 +2,13 @@ import re
 import sys
 import math
 from pathlib import Path
+
+# Enter diagnostics before importing Qt so missing DLLs become a JSON failure,
+# rather than a windowed bootloader error dialog that blocks CI.
+if __name__ == '__main__' and '--smoke-test' in sys.argv:
+    from portable_smoke import run
+    sys.exit(run(sys.argv[sys.argv.index('--smoke-test') + 1:]))
+
 from PySide6.QtCore import Qt, QThread, Signal, QUrl
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QFileDialog, QTableWidget, QTableWidgetItem, QLabel, QSlider,
@@ -384,9 +391,6 @@ class MainWindow(QMainWindow):
 
 
 if __name__ == '__main__':
-    if '--smoke-test' in sys.argv:
-        from portable_smoke import run
-        sys.exit(run(sys.argv[sys.argv.index('--smoke-test') + 1:]))
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()

@@ -1,4 +1,5 @@
-PySide6==6.12.0
+# Keep the established Qt runtime: the 6.12 wheels failed frozen startup.
+PySide6==6.8.3
 faster-whisper==1.2.1
 # PyAV 19 removed metadata_errors, still passed by faster-whisper 1.2.1.
 av==16.0.1
