@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineE
     QCheckBox, QPushButton, QDialogButtonBox, QComboBox, QMessageBox, QPlainTextEdit)
 from editor_operations import find_pattern, replace_all, shift_rows, split_row, merge_rows, cue_warnings
 from show_profiles import ProfileStore
+from timeline_checks import document_warnings
 from subtitle_format import parse_timestamp, timestamp, read_srt
 
 VIDEO_EXTENSIONS = {'.mp4', '.mkv', '.mov', '.avi', '.webm', '.m4v', '.wmv'}
@@ -38,7 +39,7 @@ class EditorTools:
             action.enabledChanged.connect(button.setEnabled)
             controls.addWidget(button)
         self.warnings_label = QLabel('Readability: no warnings')
-        self.warnings_label.setToolTip('Review guides: 20 non-space characters/second, 42 characters/line, two lines, and 0.7 seconds minimum display. Warnings never block export.')
+        self.warnings_label.setToolTip('Checks include overlaps, possible duplicates, gaps of at least 3 seconds (possibly intentional), and readability guides: 20 non-space characters/second, 42 characters/line, two lines, 0.7 seconds minimum. Warnings never block export.')
         controls.addWidget(self.warnings_label, 1)
         self.next_warning = QPushButton('Next warning')
         self.next_warning.clicked.connect(self.jump_to_warning)
@@ -76,8 +77,7 @@ class EditorTools:
         self.warning_rows = []
         self.table.blockSignals(True)
         try:
-            for row, cells in enumerate(self._last_rows):
-                warnings = cue_warnings(cells)
+            for row, warnings in enumerate(document_warnings(self._last_rows)):
                 if warnings:
                     self.warning_rows.append(row)
                 for col in range(3):
@@ -86,7 +86,7 @@ class EditorTools:
                     item.setForeground(QColor('#ffd38a') if warnings else QColor('#eaeaea'))
         finally:
             self.table.blockSignals(False)
-        self.warnings_label.setText(f'Readability: {len(self.warning_rows)} cues to review' if self.warning_rows else 'Readability: no warnings')
+        self.warnings_label.setText(f'Checks: {len(self.warning_rows)} cues to review' if self.warning_rows else 'Checks: no warnings')
         self.refresh_editor_tools()
         if self.find_dialog is not None:
             self.find_dialog.update_matches()

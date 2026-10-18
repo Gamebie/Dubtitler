@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
-    tags: ['v0.5.0']
+    tags: ['v0.6.0']
 permissions:
   contents: read
 jobs:
@@ -39,11 +39,11 @@ jobs:
           Copy-Item README.md dist/Dubtitler/README.md
           Copy-Item THIRD_PARTY_NOTICES.md dist/Dubtitler/THIRD_PARTY_NOTICES.md
       - name: Package portable ZIP
-        run: Compress-Archive -Path dist/Dubtitler -DestinationPath Dubtitler-v0.5.0-Windows-Offline-Portable.zip
+        run: Compress-Archive -Path dist/Dubtitler -DestinationPath Dubtitler-v0.6.0-Windows-Offline-Portable.zip
       - name: Test extracted portable offline with empty caches
         shell: pwsh
         run: |
-          Expand-Archive Dubtitler-v0.5.0-Windows-Offline-Portable.zip -DestinationPath portable-check
+          Expand-Archive Dubtitler-v0.6.0-Windows-Offline-Portable.zip -DestinationPath portable-check
           $env:HF_HOME = "$env:RUNNER_TEMP/dubtitler-empty-hf"
           $env:DUBTITLER_MODEL_CACHE = "$env:RUNNER_TEMP/dubtitler-empty-cache"
           $env:HF_HUB_OFFLINE = '1'
@@ -61,8 +61,8 @@ jobs:
       - name: Upload portable artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Dubtitler-v0.5.0-Windows-Offline-Portable
-          path: Dubtitler-v0.5.0-Windows-Offline-Portable.zip
+          name: Dubtitler-v0.6.0-Windows-Offline-Portable
+          path: Dubtitler-v0.6.0-Windows-Offline-Portable.zip
           if-no-files-found: error
       - name: Upload validation result
         if: always()
@@ -72,7 +72,7 @@ jobs:
           path: portable-smoke.json
           if-no-files-found: warn
   release:
-    if: github.ref == 'refs/tags/v0.5.0'
+    if: github.ref == 'refs/tags/v0.6.0'
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -80,7 +80,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: Dubtitler-v0.5.0-Windows-Offline-Portable
+          name: Dubtitler-v0.6.0-Windows-Offline-Portable
           path: release
       - uses: softprops/action-gh-release@v2
         with:
@@ -89,6 +89,6 @@ jobs:
           body: |
             Download the Windows Offline Portable ZIP, extract the whole folder, and run Dubtitler.exe.
             Includes Base English and offline neural speaker models. No Python, model download, account, or installation required.
-            Other transcription models require a one-time download. No installer variant is published for v0.5.
+            Other transcription models require a one-time download. No installer variant is published for v0.6.
           files: release/*.zip
           fail_on_unmatched_files: true

@@ -157,6 +157,53 @@ def run(args):
             app.sendEvent(window, drop)
             assert drop.isAccepted() and window.raw_cells()[0][2] == 'Too quick to read'
             result.update(find_replace=True, show_profiles=True, timing_shift=True, split_merge=True, readability=True, file_drop=True)
+            # Reopen a real autosaved project in a fresh window after releasing its
+            # lock. The chosen English track and subtitle export baseline survive.
+            assert window.autosave_project()
+            project = str(window.project_path)
+            expected = window.raw_cells()
+            window.close()
+            window = MainWindow(recovery_directory=recovery_temp.name, offer_recovery=False, profiles_directory=Path(recovery_temp.name) / 'profiles')
+            window.show()
+            assert window.open_project(project)
+            wait_until(lambda: window.track_probe is None and len(window.player.audioTracks()) == 2)
+            assert window.raw_cells() == expected
+            assert window.audio_tracks.currentData() == 1
+            assert window.name_hints.text() == 'Seijou'
+            assert not window.dirty
+            wait_until(lambda: window.wave_worker is None and bool(window.waveform.peaks))
+            assert max(window.waveform.peaks) > .2
+            window.table.selectRow(0)
+            window.waveform_boundary(0, 100, 400)
+            assert window.raw_cells()[0][1] == '00:00:00,400'
+            window.undo_stack.undo()
+            assert window.raw_cells() == expected
+            window.navigate_cue(1)
+            assert window.table.currentRow() == 0
+            from timeline_checks import document_warnings
+            warnings = document_warnings([('00:00:00,000', '00:00:01,000', 'Same'), ('00:00:00,500', '00:00:01,500', 'same'), ('00:00:05,000', '00:00:06,000', 'Later')])
+            assert any('Overlaps' in s for s in warnings[0])
+            assert any('duplicate' in s for s in warnings[1])
+            assert any('Gap' in s for s in warnings[2])
+            from batch_queue import BatchDialog
+            from project_store import write_new_srt
+            queue = BatchDialog(window)
+            queue.add_paths([fixture])
+            queue.table.cellWidget(0, 1).setCurrentIndex(queue.table.cellWidget(0, 1).findData(0))
+            queue.directory.setText(str(Path(media_temp) / 'batch'))
+            queue.start_queue()
+            wait_until(lambda: not queue.running)
+            assert 'No speech' in queue.table.item(0, 2).text()
+            assert window.raw_cells() == expected
+            queue.start_queue()
+            queue.cancel_queue()
+            wait_until(lambda: not queue.running)
+            assert 'Cancelled' in queue.table.item(0, 2).text()
+            queue.close()
+            first = write_new_srt(Path(media_temp) / 'batch', 'episode', [(0, 1000, 'Original')])
+            second = write_new_srt(Path(media_temp) / 'batch', 'episode', [(0, 1000, 'New')])
+            assert first != second and 'Original' in first.read_text(encoding='utf-8-sig')
+            result.update(project_reopen=True, waveform=True, navigation=True, timeline_checks=True, batch_queue=True, export_collision_safe=True)
             window.player.setSource(__import__('PySide6.QtCore', fromlist=['QUrl']).QUrl())
             app.processEvents()
         window.mark_saved()
