@@ -66,7 +66,7 @@ class EditorTests(unittest.TestCase):
         self.assertFalse(self.window.export_button.isEnabled())
 
     def test_srt_roundtrip_multiline_unicode_sorted(self):
-        expected = [(0, 500, 'First'), (1000, 2000, 'Hello cafÃ©\nSecond line')]
+        expected = [(0, 500, 'First'), (1000, 2000, 'Hello café\nSecond line')]
         self.window.set_rows(list(reversed(expected)))
         with tempfile.TemporaryDirectory() as temp:
             path = str(Path(temp) / 'test.srt')
