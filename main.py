@@ -1,7 +1,10 @@
 import re
 import sys
-import math
 from pathlib import Path
+
+if __name__ == '__main__':
+    import multiprocessing
+    multiprocessing.freeze_support()
 
 # Enter diagnostics before importing Qt so missing DLLs become a JSON failure,
 # rather than a windowed bootloader error dialog that blocks CI.
@@ -9,13 +12,15 @@ if __name__ == '__main__' and '--smoke-test' in sys.argv:
     from portable_smoke import run
     sys.exit(run(sys.argv[sys.argv.index('--smoke-test') + 1:]))
 
-from PySide6.QtCore import Qt, QThread, Signal, QUrl
+from PySide6.QtCore import Qt, QUrl
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QFileDialog, QTableWidget, QTableWidgetItem, QLabel, QSlider,
     QMessageBox, QComboBox, QSplitter, QAbstractItemView, QProgressBar, QGroupBox, QCheckBox)
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
-from model_runtime import DEFAULT_MODEL, bundled_model, load_model
+from model_runtime import DEFAULT_MODEL, bundled_model
+from transcriber import Transcriber
+from playback import PlaybackTools
 from editing import EditingSafety
 
 
@@ -37,49 +42,16 @@ def parse_timestamp(value):
     return ((h * 60 + m) * 60 + s) * 1000 + milli
 
 
-class Transcriber(QThread):
-    completed = Signal(list)
-    failed = Signal(str)
-    progress = Signal(str, int)  # -1 means no measurable total for this phase.
-
-    def __init__(self, path, model_name, allow_download=False):
-        super().__init__()
-        self.path = path
-        self.model_name = model_name
-        self.allow_download = allow_download
-
-    def run(self):
-        try:
-            model = load_model(self.model_name, self.progress.emit, self.allow_download)
-            self.progress.emit('Preparing audio and detecting speech…', -1)
-            segments, info = model.transcribe(self.path, language='en', vad_filter=True)
-            duration = info.duration
-            measured = duration > 0 and math.isfinite(duration)
-            self.progress.emit('Transcribing English audio…', 0 if measured else -1)
-            rows = []
-            furthest = 0.0
-            for segment in segments:
-                rows.append((round(segment.start * 1000), round(segment.end * 1000), segment.text.strip()))
-                # faster-whisper restores original media timestamps after VAD.
-                # This measures audio position reached, never elapsed time or ETA.
-                furthest = max(furthest, segment.end)
-                percent = min(99, int(100 * furthest / duration)) if measured else -1
-                detail = f'Audio position {furthest:.1f}s / {duration:.1f}s' if measured else f'{len(rows)} subtitles generated'
-                self.progress.emit(f'Transcribing — {detail}', percent)
-            self.progress.emit('Finishing subtitle list…', -1)
-            self.completed.emit(rows)
-        except Exception as exc:
-            self.failed.emit(str(exc))
-
-
-class MainWindow(EditingSafety, QMainWindow):
+class MainWindow(PlaybackTools, EditingSafety, QMainWindow):
     def __init__(self, recovery_directory=None, offer_recovery=True):
         super().__init__()
-        self.setWindowTitle('Dubtitler v0.2.1 — English Dub Subtitle Editor')
+        self.setWindowTitle('Dubtitler v0.3.0 — English Dub Subtitle Editor')
         self.resize(1200, 850)
         self.video_path = None
         self.busy = False
         self.worker = None
+        self.cancel_pending = False
+        self.job_terminal = False
         self.player = QMediaPlayer(self)
         self.audio = QAudioOutput(self)
         self.player.setAudioOutput(self.audio)
@@ -98,9 +70,10 @@ class MainWindow(EditingSafety, QMainWindow):
         self.table.setColumnWidth(1, 180)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
+        self.table.setMinimumHeight(150)
         self.seek = QSlider(Qt.Horizontal)
         self.seek.setRange(0, 0)
-        self.seek.sliderMoved.connect(self.player.setPosition)
+        self.seek.sliderMoved.connect(self.manual_seek)
         self.player.durationChanged.connect(lambda duration: self.seek.setRange(0, duration))
         self.player.positionChanged.connect(self.position_changed)
         self.player.errorOccurred.connect(lambda *_: self.statusBar().showMessage(self.player.errorString()))
@@ -110,11 +83,13 @@ class MainWindow(EditingSafety, QMainWindow):
         self.setCentralWidget(root)
         outer = QVBoxLayout(root)
         choose = QGroupBox('1 · Choose a video')
-        choose_layout = QHBoxLayout(choose)
-        self.open_button = self.add_button(choose_layout, 'Choose Video…', self.open_video)
+        choose_layout = QVBoxLayout(choose)
+        file_row = QHBoxLayout()
+        choose_layout.addLayout(file_row)
+        self.open_button = self.add_button(file_row, 'Choose Video…', self.open_video)
         self.video_label = QLabel('Start here: choose the video containing the English dub audio.')
         self.video_label.setWordWrap(True)
-        choose_layout.addWidget(self.video_label, 1)
+        file_row.addWidget(self.video_label, 1)
         outer.addWidget(choose)
         transcribe_group = QGroupBox('2 · Choose a model and transcribe')
         transcribe_layout = QVBoxLayout(transcribe_group)
@@ -128,6 +103,7 @@ class MainWindow(EditingSafety, QMainWindow):
         bar.addWidget(QLabel('AI model:'))
         bar.addWidget(self.model)
         self.transcribe_button = self.add_button(bar, 'Transcribe English Dub', self.transcribe)
+        self.cancel_button = self.add_button(bar, 'Cancel transcription', self.cancel_transcription)
         bar.addStretch()
         self.model_hint = QLabel()
         self.model_hint.setWordWrap(True)
@@ -155,8 +131,8 @@ class MainWindow(EditingSafety, QMainWindow):
         controls = QHBoxLayout()
         player_layout.addLayout(controls)
         self.play_button = self.add_button(controls, 'Play / Pause', self.toggle_play)
-        self.back_button = self.add_button(controls, '−5s', lambda: self.player.setPosition(max(0, self.player.position()-5000)))
-        self.forward_button = self.add_button(controls, '+5s', lambda: self.player.setPosition(self.player.position()+5000))
+        self.back_button = self.add_button(controls, '−5s', lambda: self.manual_seek(self.player.position()-5000))
+        self.forward_button = self.add_button(controls, '+5s', lambda: self.manual_seek(self.player.position()+5000))
         controls.addStretch()
         split.addWidget(player_pane)
         editor_pane = QGroupBox('3 · Review, edit and export subtitles')
@@ -173,10 +149,11 @@ class MainWindow(EditingSafety, QMainWindow):
         self.export_button = self.add_button(row_controls, 'Export SRT…', self.export_srt)
         editor_layout.addWidget(self.table)
         split.addWidget(editor_pane)
-        split.setSizes([410, 300])
+        split.setSizes([270, 330])
         self.setStyleSheet('QMainWindow,QWidget{background:#242733;color:#eaeaea;} QPushButton{background:#414a65;border:0;border-radius:5px;padding:8px;} QPushButton:hover{background:#576789;} QTableWidget{background:#20232e;alternate-background-color:#2b3040;gridline-color:#424858;} QHeaderView::section{background:#353b4e;color:white;padding:5px;} QComboBox{background:#353b4e;padding:5px;}')
         self.setStyleSheet(self.styleSheet() + ' QPushButton:disabled{background:#303441;color:#858a99;} QGroupBox{margin-top:12px;padding-top:8px;} QProgressBar{text-align:center;} QProgressBar::chunk{background:#526ea3;}')
         self.statusBar().showMessage('Ready')
+        self.init_playback(choose_layout, controls)
         self.init_editing(row_controls, recovery_directory, offer_recovery)
         self.refresh_actions()
 
@@ -186,13 +163,16 @@ class MainWindow(EditingSafety, QMainWindow):
             text = 'Ready offline: bundled model found. No account, internet or model download needed.'
         else:
             text = 'Uses a cached model if available. If missing, enable the one-time download below. The Offline ZIP includes Base English.'
-        self.model_hint.setText(text + ' Transcribes spoken English; choose the English audio track in your source video.')
+        self.model_hint.setText(text + ' Choose the English dub in the audio-track selector above.')
 
     def refresh_actions(self):
-        self.open_button.setEnabled(not self.busy)
+        probing = self.track_probe is not None
+        self.open_button.setEnabled(not self.busy and not probing)
+        self.audio_tracks.setEnabled(self.audio_ready and not self.busy and not probing)
         self.model.setEnabled(not self.busy)
         self.allow_download.setEnabled(not self.busy)
-        self.transcribe_button.setEnabled(bool(self.video_path) and not self.busy)
+        self.transcribe_button.setEnabled(bool(self.video_path) and self.audio_ready and not self.busy and not probing)
+        self.cancel_button.setEnabled(self.busy and not self.cancel_pending and not self.job_terminal)
         for button in (self.import_button, self.add_row_button, self.delete_button):
             button.setEnabled(not self.busy)
         self.export_button.setEnabled((self.table.rowCount() > 0 or self.dirty) and not self.busy)
@@ -200,12 +180,18 @@ class MainWindow(EditingSafety, QMainWindow):
         self.undo_action.setEnabled(not self.busy and self.undo_stack.canUndo())
         self.redo_action.setEnabled(not self.busy and self.undo_stack.canRedo())
         for widget in (self.play_button, self.back_button, self.forward_button, self.seek):
-            widget.setEnabled(bool(self.video_path))
+            widget.setEnabled(bool(self.video_path) and not probing)
+        self.replay_button.setEnabled(bool(self.video_path) and not probing and not self.busy and bool(self.table.selectedIndexes()) and self.player.duration() > 0)
+        self.stop_replay_button.setEnabled(self.replay_range is not None)
+        self.loop_replay.setEnabled(not self.busy)
+        self.replay_context.setEnabled(not self.busy)
 
     def editor_changed(self, item):
         self.change_cells(self.raw_cells(), 'Edit subtitle', (item.row(), item.column()))
 
     def transcription_progress(self, message, value):
+        if self.cancel_pending:
+            return
         self.progress_label.setText(message)
         if value < 0:
             self.progress_bar.setRange(0, 0)
@@ -215,18 +201,45 @@ class MainWindow(EditingSafety, QMainWindow):
             self.progress_bar.setFormat('Audio position: %p%')
 
     def transcription_finished(self):
+        if self.cancel_pending:
+            self.transcription_cancelled()
         self.busy = False
+        self.cancel_pending = False
         self.refresh_actions()
+
+    def cancel_transcription(self):
+        if not self.busy or self.cancel_pending or self.job_terminal:
+            return
+        self.cancel_pending = True
+        self.worker.cancel()
+        self.progress_label.setText('Cancelling transcription… existing subtitles and recovery copies are kept.')
+        self.progress_bar.setRange(0, 0)
+        self.refresh_actions()
+
+    def transcription_cancelled(self):
+        self.job_terminal = True
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setFormat('Cancelled')
+        self.progress_label.setText('Transcription cancelled. Existing subtitles are unchanged. You can edit, export, or start again.')
+        self.statusBar().showMessage('Transcription cancelled')
 
     def closeEvent(self, event):
         if self.busy or (self.worker is not None and self.worker.isRunning()):
-            QMessageBox.information(self, 'Transcription in progress', 'Wait for transcription to finish before closing Dubtitler.')
+            QMessageBox.information(self, 'Transcription in progress', 'Cancel transcription, then close once cancellation finishes.')
+            event.ignore()
+            return
+        if self.track_probe is not None:
+            QMessageBox.information(self, 'Reading audio tracks', 'Wait for the audio-track list to finish loading, then close.')
             event.ignore()
             return
         if not self.confirm_unsaved('close Dubtitler'):
             event.ignore()
             return
         self.finish_editing()
+        self.stop_replay()
+        self.player.stop()
+        self.player.setSource(QUrl())
         super().closeEvent(event)
 
     def add_button(self, layout, label, callback):
@@ -236,7 +249,7 @@ class MainWindow(EditingSafety, QMainWindow):
         return button
 
     def open_video(self):
-        if self.busy:
+        if self.busy or self.track_probe is not None:
             return
         self.finish_cell_edit()
         path, _ = QFileDialog.getOpenFileName(self, 'Choose a video with English audio', '', 'Video (*.mp4 *.mkv *.mov *.avi *.webm);;All files (*)')
@@ -252,10 +265,7 @@ class MainWindow(EditingSafety, QMainWindow):
                 return
             self.set_rows([], clean=True)
             self.srt_path = None
-            self.video_path = path
-            self.video_label.setText(Path(path).name)
-            self.video_label.setToolTip(path)
-            self.player.setSource(QUrl.fromLocalFile(path))
+            self.load_video(path)
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(0)
             self.progress_bar.setFormat('Ready to transcribe')
@@ -264,6 +274,7 @@ class MainWindow(EditingSafety, QMainWindow):
             self.statusBar().showMessage(f'Opened {Path(path).name}')
 
     def toggle_play(self):
+        self.stop_replay(pause=False)
         if self.player.playbackState() == QMediaPlayer.PlayingState:
             self.player.pause()
         else:
@@ -296,12 +307,14 @@ class MainWindow(EditingSafety, QMainWindow):
         self.change_cells([cells for index, cells in enumerate(self._last_rows) if index not in rows], 'Delete subtitles', (min(rows), 0) if rows else None)
 
     def jump_to_selection(self):
+        self.stop_replay()
         row = self.table.currentRow()
         if row >= 0 and self.table.item(row, 0):
             try:
-                self.player.setPosition(parse_timestamp(self.table.item(row, 0).text()))
+                self.manual_seek(parse_timestamp(self.table.item(row, 0).text()))
             except ValueError:
                 pass
+        self.refresh_actions()
 
     def position_changed(self, pos):
         if not self.seek.isSliderDown():
@@ -324,8 +337,8 @@ class MainWindow(EditingSafety, QMainWindow):
         if self.busy:
             return
         self.finish_cell_edit()
-        if not self.video_path:
-            QMessageBox.information(self, 'No video', 'Open a video first.')
+        if not self.video_path or not self.audio_ready or self.track_probe is not None:
+            QMessageBox.information(self, 'Choose video and audio', 'Choose a video, wait for its audio tracks, then select the English dub track.')
             return
         if self.dirty:
             if not self.confirm_unsaved('replace these subtitles with a new transcription'):
@@ -333,17 +346,25 @@ class MainWindow(EditingSafety, QMainWindow):
         elif self.table.rowCount() and QMessageBox.question(self, 'Replace subtitles?', 'Transcription will replace current subtitles. Continue?') != QMessageBox.Yes:
             return
         self.busy = True
+        self.cancel_pending = False
+        self.job_terminal = False
+        self.stop_replay()
         self.refresh_actions()
         self.transcription_progress('Starting transcription…', -1)
         self.statusBar().showMessage('Working locally. Loading and audio preparation have no percentage; transcription reports audio position.')
-        self.worker = Transcriber(self.video_path, self.model.currentData(), self.allow_download.isChecked())
+        self.worker = Transcriber(self.video_path, self.model.currentData(), self.allow_download.isChecked(), self.audio_tracks.currentData())
         self.worker.progress.connect(self.transcription_progress)
         self.worker.completed.connect(self.transcription_complete)
         self.worker.failed.connect(self.transcription_failed)
+        self.worker.cancelled.connect(self.transcription_cancelled)
         self.worker.finished.connect(self.transcription_finished)
         self.worker.start()
 
     def transcription_complete(self, rows):
+        if self.cancel_pending:
+            return
+        self.job_terminal = True
+        self.cancel_button.setEnabled(False)
         self.change_cells([(timestamp(start), timestamp(end), text) for start, end, text in rows], 'Replace with transcription')
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
@@ -352,6 +373,10 @@ class MainWindow(EditingSafety, QMainWindow):
         self.statusBar().showMessage(f'Transcription finished: {len(rows)} subtitles')
 
     def transcription_failed(self, message):
+        if self.cancel_pending:
+            return
+        self.job_terminal = True
+        self.cancel_button.setEnabled(False)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat('Failed — retry available')

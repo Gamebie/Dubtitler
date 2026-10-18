@@ -1,18 +1,18 @@
-# Dubtitler v0.2.1
+# Dubtitler v0.3.0
 
 A local Windows app for creating, editing, and exporting English dub subtitles.
 
 ## Use the offline portable app (recommended)
 
-1. Download **Dubtitler-v0.2.1-Windows-Offline-Portable.zip** from a successful
-   Actions build, or from the v0.2.1 preview release when published.
+1. Download **Dubtitler-v0.3.0-Windows-Offline-Portable.zip** from a successful
+   Actions build, or from the v0.3.0 preview release when published.
 2. Right-click the ZIP and **Extract All**. Keep the entire `Dubtitler` folder,
    including `_internal` and `models`. Run `Dubtitler.exe` inside that folder.
    No installer, Python installation, account, or model download is needed.
-3. **Choose Video**: select a video containing English dub audio.
+3. **Choose Video**: select a video, then select its English dub under **Audio track**.
 4. **Choose a model and transcribe**: keep **Base English** for offline use and
-   click **Transcribe English Dub**. The app uses the first audio stream; for
-   multi-track videos, make the English track the first track in your source.
+   click **Transcribe English Dub**. Preview and transcription use the selected
+   track. The app initially prefers an English-tagged track; confirm by listening.
 5. **Review, edit and export**: double-click cells to edit dialogue or timing
    (`HH:MM:SS,mmm`), select rows to seek, and add/delete rows as needed. Click
    **Export SRT** and save beside your video. Import SRT also works without a video.
@@ -22,7 +22,33 @@ compression). Other models remain optional. There is **no installer artifact in
 the v0.2 workflow**; old v0.1 installer/portable downloads do not include this model.
 The old Inno Setup script is retained only as a legacy build reference.
 
-## Editing safety (v0.2.1)
+## Audio, cancellation and replay (v0.3.0)
+
+- The audio selector lists every audio stream with language, codec, channel count
+  and title where available. English tags are preferred, avoiding commentary when
+  another English track is tagged. Missing tags fall back to the first track;
+  choose manually if needed. No-audio files disable transcription with a message.
+- Track selection controls preview and transcription. If Qt cannot match the
+  file's audio streams, preview is muted with an explanation; transcription can
+  still use the selected stream. Leading track offsets are retained relative to
+  the video timeline. Recovery copies also remember the selected track.
+- **Cancel transcription** stops the isolated transcription process during audio
+  reading, model loading/downloading or recognition. The editor remains open,
+  existing subtitles, undo history and recovery files are preserved, and no
+  partial transcript replaces them. Wait for **Cancelled** before closing or
+  starting again. Previously cached models are kept; interrupted optional model
+  downloads may need to resume on the next attempt.
+- Select a subtitle and click **Replay selected** or press **F4**. It plays that
+  cue once with configurable **Lead / tail** audio (0–5 seconds on each side;
+  default 0.5 seconds). Enable **Loop** to repeat until **Stop replay** is clicked.
+  Turning Loop off lets the current pass finish. Boundaries clamp to the video.
+- Seeking manually, selecting another row, committing an edit, changing tracks,
+  or starting transcription stops replay. End-of-video is handled for looping.
+  Replay requires a loaded preview and valid subtitle timings. Its boundary
+  checks run every 25 ms; final audible boundaries also depend on codec/output
+  buffering, so it is a review aid rather than a sample-accurate audio cutter.
+
+## Editing safety
 
 - **Undo / Redo** buttons and the Edit menu cover committed text/timing edits,
   add/delete operations, and replacement by transcription. Use Ctrl+Z to undo
@@ -56,8 +82,8 @@ The old Inno Setup script is retained only as a legacy build reference.
   silence can cause jumps or pauses. Unknown duration stays indeterminate.
 - The bar stays below 100% until all segments finish and the subtitle list is ready.
   Silence completes with a clear no-speech message.
-- While transcribing, changing video/model and subtitle editing are disabled.
-  Wait for the job to finish before closing. A failed job keeps existing subtitles
+- While transcribing, changing video/audio/model and subtitle editing are disabled.
+  Cancel the job or wait for it to finish before closing. A failed job keeps existing subtitles
   and re-enables controls so you can retry.
 
 ## Model locations and optional downloads
@@ -108,14 +134,16 @@ pyinstaller --noconfirm --clean --windowed --onedir --name Dubtitler --collect-a
 python scripts/bundle_model.py dist/Dubtitler
 python scripts/collect_licenses.py dist/Dubtitler
 Copy-Item README.md,THIRD_PARTY_NOTICES.md dist/Dubtitler/
-Compress-Archive -Path dist/Dubtitler -DestinationPath Dubtitler-v0.2.1-Windows-Offline-Portable.zip
+Compress-Archive -Path dist/Dubtitler -DestinationPath Dubtitler-v0.3.0-Windows-Offline-Portable.zip
 ```
 
 The workflow builds on pull requests, main pushes, and manual runs. It tests the
 extracted ZIP with empty model caches, Hugging Face offline mode, and Python
 socket connections blocked. Its frozen-app smoke test opens Qt, verifies the
-model manifest, loads the bundled model, runs VAD on silence, and exercises the
-decoder. It uploads the portable only after that test passes. A `v0.2.1` tag
+model manifest, selects the English track of a generated dual-track video, checks
+replay/loop control, spawns a real transcription process, cancels and restarts it,
+loads the bundled model, runs VAD on silence, and exercises the decoder. It
+uploads the portable only after that test passes. A `v0.3.0` tag
 publishes a preview release after the build passes; ordinary pushes do not
 rewrite an existing release. CI does not replace manual playback and real-video
 quality testing on another Windows PC.

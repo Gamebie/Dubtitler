@@ -21,6 +21,8 @@ def read_snapshot(path):
     for key in ('video_path', 'srt_path'):
         if data.get(key) is not None and not isinstance(data[key], str):
             raise ValueError('Invalid recovery file path')
+    if data.get('audio_index') is not None and (type(data['audio_index']) is not int or data['audio_index'] < 0):
+        raise ValueError('Invalid recovery audio track')
     return data
 
 
