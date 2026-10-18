@@ -4,7 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
-    tags: ['v0.2.0']
+    tags: ['v0.2.1']
 permissions:
   contents: read
 jobs:
@@ -37,11 +37,11 @@ jobs:
           Copy-Item README.md dist/Dubtitler/README.md
           Copy-Item THIRD_PARTY_NOTICES.md dist/Dubtitler/THIRD_PARTY_NOTICES.md
       - name: Package portable ZIP
-        run: Compress-Archive -Path dist/Dubtitler -DestinationPath Dubtitler-v0.2.0-Windows-Offline-Portable.zip
+        run: Compress-Archive -Path dist/Dubtitler -DestinationPath Dubtitler-v0.2.1-Windows-Offline-Portable.zip
       - name: Test extracted portable offline with empty caches
         shell: pwsh
         run: |
-          Expand-Archive Dubtitler-v0.2.0-Windows-Offline-Portable.zip -DestinationPath portable-check
+          Expand-Archive Dubtitler-v0.2.1-Windows-Offline-Portable.zip -DestinationPath portable-check
           $env:HF_HOME = "$env:RUNNER_TEMP/dubtitler-empty-hf"
           $env:DUBTITLER_MODEL_CACHE = "$env:RUNNER_TEMP/dubtitler-empty-cache"
           $env:HF_HUB_OFFLINE = '1'
@@ -59,8 +59,8 @@ jobs:
       - name: Upload portable artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Dubtitler-v0.2.0-Windows-Offline-Portable
-          path: Dubtitler-v0.2.0-Windows-Offline-Portable.zip
+          name: Dubtitler-v0.2.1-Windows-Offline-Portable
+          path: Dubtitler-v0.2.1-Windows-Offline-Portable.zip
           if-no-files-found: error
       - name: Upload validation result
         if: always()
@@ -70,7 +70,7 @@ jobs:
           path: portable-smoke.json
           if-no-files-found: warn
   release:
-    if: github.ref == 'refs/tags/v0.2.0'
+    if: github.ref == 'refs/tags/v0.2.1'
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -78,7 +78,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: Dubtitler-v0.2.0-Windows-Offline-Portable
+          name: Dubtitler-v0.2.1-Windows-Offline-Portable
           path: release
       - uses: softprops/action-gh-release@v2
         with:

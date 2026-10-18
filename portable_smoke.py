@@ -26,14 +26,23 @@ def run(args):
         from main import MainWindow
         from model_runtime import DEFAULT_MODEL, bundled_model, load_model
         app = QApplication.instance() or QApplication([])
-        window = MainWindow()
+        recovery_temp = tempfile.TemporaryDirectory()
+        window = MainWindow(recovery_directory=recovery_temp.name, offer_recovery=False)
         window.show()
         app.processEvents()
         assert not window.transcribe_button.isEnabled()
         assert not window.export_button.isEnabled()
         window.add_row()
         assert window.export_button.isEnabled()
+        window.undo_stack.undo()
+        assert window.table.rowCount() == 0
+        window.undo_stack.redo()
+        assert window.table.rowCount() == 1
+        window.save_recovery()
+        assert window.recovery_path.is_file()
+        window.mark_saved()
         window.close()
+        recovery_temp.cleanup()
         path = bundled_model(DEFAULT_MODEL)
         if path is None:
             raise RuntimeError('Offline portable is missing its complete bundled model')
