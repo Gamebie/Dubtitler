@@ -33,7 +33,7 @@ def run(args):
         from model_runtime import DEFAULT_MODEL, bundled_model, load_model
         app = QApplication.instance() or QApplication([])
         recovery_temp = tempfile.TemporaryDirectory()
-        window = MainWindow(recovery_directory=recovery_temp.name, offer_recovery=False)
+        window = MainWindow(recovery_directory=recovery_temp.name, offer_recovery=False, profiles_directory=Path(recovery_temp.name) / 'profiles')
         window.show()
         app.processEvents()
         assert not window.transcribe_button.isEnabled()
@@ -103,6 +103,60 @@ def run(args):
             # Exercise spawn and cancellation from the actual frozen executable.
             worker_check(fixture, 0, cancel=True)
             assert worker_check(fixture, 0) == [[]]
+            # Exercise the manual workflow in the frozen app, including persistence
+            # and a real Qt file-drop event. Never touch the user's profile folder.
+            from PySide6.QtWidgets import QDialog, QPlainTextEdit, QFileDialog
+            from PySide6.QtCore import QMimeData, QUrl, QPoint, QPointF, Qt, QItemSelectionModel
+            from PySide6.QtGui import QDragEnterEvent, QDropEvent
+            window.profile_store.update('Smoke show', {'names': 'Seijou', 'replacements': 'say joe => Seijou'})
+            window.reload_profiles()
+            window.load_show_profile('Smoke show')
+            assert window.name_hints.text() == 'Seijou'
+            window.set_rows([(100, 1900, 'Say Joe is ready')], clean=True)
+            original = window.raw_cells()
+            window.open_find_replace()
+            window.find_dialog.find.setText('say joe')
+            window.find_dialog.replacement.setText('Seijou')
+            window.replace_dialog_matches()
+            assert window.raw_cells()[0][2] == 'Seijou is ready'
+            window.undo_stack.undo()
+            assert window.raw_cells() == original
+            window.find_dialog.hide()
+            window.shift_timing(25)
+            assert window.raw_cells()[0][0] == '00:00:00,125'
+            window.undo_stack.undo()
+            window.apply_saved_rules()
+            assert window.raw_cells()[0][2] == 'Seijou is ready'
+            window.table.selectRow(0)
+            def choose_split(dialog):
+                text = dialog.findChild(QPlainTextEdit)
+                cursor = text.textCursor()
+                cursor.setPosition(6)
+                text.setTextCursor(cursor)
+                return QDialog.Accepted
+            with patch.object(window.player, 'position', return_value=900), patch.object(QDialog, 'exec', choose_split):
+                window.split_selected()
+            assert window.table.rowCount() == 2
+            assert ''.join(row[2] for row in window.raw_cells()) == 'Seijou is ready'
+            window.table.selectAll()
+            window.merge_selected()
+            assert window.table.rowCount() == 1
+            window.undo_stack.undo()
+            assert window.table.rowCount() == 2
+            window.set_rows([(100, 200, 'Too quick to read')], clean=True)
+            assert window.warning_rows == [0]
+            exported = str(Path(media_temp) / 'tools.srt')
+            with patch.object(QFileDialog, 'getSaveFileName', return_value=(exported, '')):
+                assert window.export_srt()
+            mime = QMimeData()
+            mime.setUrls([QUrl.fromLocalFile(exported)])
+            enter = QDragEnterEvent(QPoint(5, 5), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier)
+            app.sendEvent(window, enter)
+            assert enter.isAccepted()
+            drop = QDropEvent(QPointF(5, 5), Qt.CopyAction, mime, Qt.LeftButton, Qt.NoModifier)
+            app.sendEvent(window, drop)
+            assert drop.isAccepted() and window.raw_cells()[0][2] == 'Too quick to read'
+            result.update(find_replace=True, show_profiles=True, timing_shift=True, split_merge=True, readability=True, file_drop=True)
             window.player.setSource(__import__('PySide6.QtCore', fromlist=['QUrl']).QUrl())
             app.processEvents()
         window.mark_saved()

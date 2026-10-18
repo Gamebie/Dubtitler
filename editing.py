@@ -2,7 +2,7 @@
 from pathlib import Path
 from uuid import uuid4
 
-from PySide6.QtCore import QLockFile, QTimer, Qt
+from PySide6.QtCore import QLockFile, QTimer, Qt, QItemSelectionModel
 from PySide6.QtGui import QKeySequence, QUndoCommand, QUndoStack
 from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QPushButton, QTableWidgetItem
 from recovery import recovery_directory, read_snapshot, write_snapshot
@@ -68,11 +68,13 @@ class EditingSafety:
                 for col, value in enumerate(cells):
                     self.table.setItem(row, col, QTableWidgetItem(value))
             if cursor and rows:
-                self.table.setCurrentCell(min(max(cursor[0], 0), len(rows) - 1), max(cursor[1], 0))
+                self.table.setCurrentCell(min(max(cursor[0], 0), len(rows) - 1), max(cursor[1], 0),
+                                          QItemSelectionModel.ClearAndSelect | QItemSelectionModel.Rows)
         finally:
             self.table.blockSignals(False)
         self._last_rows = tuple(tuple(row) for row in rows)
         self.document_changed()
+        self.update_readability()
         self.update_caption(self.player.position())
         self.refresh_actions()
 
@@ -84,7 +86,7 @@ class EditingSafety:
 
     def document_changed(self):
         self.recovery_saved = False
-        self.setWindowTitle('Dubtitler v0.4.0 — English Dub Subtitle Editor' + (' *' if self.dirty else ''))
+        self.setWindowTitle('Dubtitler v0.5.0 — English Dub Subtitle Editor' + (' *' if self.dirty else ''))
         if self.dirty:
             self.save_status.setText('Unsaved edits · saving recovery…')
             self.autosave_timer.start()
