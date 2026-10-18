@@ -74,6 +74,7 @@ class PlaybackTools:
 
     def load_video(self, path, preferred_audio_index=None):
         self.stop_replay()
+        self.request_waveform(None)
         self.video_path = path
         self.preferred_audio_index = preferred_audio_index
         self.video_label.setText(Path(path).name)
@@ -128,6 +129,7 @@ class PlaybackTools:
         if path != self.video_path:
             return
         self.audio_ready = False
+        self.request_waveform(None)
         self.audio_tracks.clear()
         self.audio_tracks.addItem('Could not read audio tracks', None)
         self.track_hint.setText(f'Could not read this video’s audio: {message}. Try another local video.')
@@ -136,6 +138,9 @@ class PlaybackTools:
     def audio_track_changed(self, *_):
         self.stop_replay()
         self.sync_playback_audio()
+        index = self.audio_tracks.currentData()
+        self.request_waveform((self.video_path, index) if self.video_path and index is not None and Path(self.video_path).is_file() else None)
+        self.schedule_project_save()
         if self.dirty:
             self.autosave_timer.start()
 

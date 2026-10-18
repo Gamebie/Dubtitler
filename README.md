@@ -1,11 +1,11 @@
-# Dubtitler v0.5.0
+# Dubtitler v0.6.0
 
 A local Windows app for creating, editing, and exporting English dub subtitles.
 
 ## Use the offline portable app (recommended)
 
-1. Download **Dubtitler-v0.5.0-Windows-Offline-Portable.zip** from a successful
-   Actions build, or from the v0.5.0 preview release when published.
+1. Download **Dubtitler-v0.6.0-Windows-Offline-Portable.zip** from a successful
+   Actions build, or from the v0.6.0 preview release when published.
 2. Right-click the ZIP and **Extract All**. Keep the entire `Dubtitler` folder,
    including `_internal` and `models`. Run `Dubtitler.exe` inside that folder.
    No installer, Python installation, account, or model download is needed.
@@ -22,7 +22,60 @@ compression), plus neural speaker models (about 35 MB). Other transcription mode
 the v0.4 workflow**; old v0.1 installer/portable downloads do not include this model.
 The old Inno Setup script is retained only as a legacy build reference.
 
-## Manual editing tools (v0.5.0)
+## Projects, waveform and episode queues (v0.6.0)
+
+**Show context / model options** reveals the show/profile, name hints, spelling
+rules and download controls. These details start folded to leave room for the
+video and waveform during editing; the selected settings remain active.
+
+- Choosing a real video or importing an SRT starts a local **autosaved project**.
+  **File → Recent projects** reopens its raw subtitle edits, SRT export baseline,
+  video path, selected audio track, show settings/profile, model and playback
+  position. Edits/settings save after 750 ms of idle time; playback position saves
+  at most every two seconds. Finish an active cell edit to commit it. Autosaves
+  live in `%LOCALAPPDATA%\Dubtitler\workspace\projects`; `DUBTITLER_WORKSPACE_DIR`
+  overrides the workspace. Project status is shown separately from SRT/recovery
+  status. Saving a project does not mark an SRT as exported.
+- **Ctrl+S / File → Save project…** saves a named `.dubtitler` file with continuing
+  autosave. **Ctrl+O** opens one. Project files contain local paths and settings,
+  not a copy of your video. Missing videos leave the subtitles editable; use
+  **File → Relink project video…** to restore preview without clearing cues.
+  Reopening starts fresh undo history. A project can be open in one window at a
+  time; failed writes retain the previous file and show a persistent save error.
+  Close flushes the project, then retains the existing SRT Save/Discard/Cancel
+  prompt. Discarding an SRT/recovery copy does not delete the autosaved project.
+- The **waveform** is decoded from the selected track in an isolated cancellable
+  process. It shows audio amplitude (including music), not AI speech labels.
+  Choose 5–120 seconds of zoom; it follows the playhead. Click to seek, or select
+  a cue and drag a gold start/end edge. A drag is one undoable edit; invalid timing
+  is rejected. It does not automatically snap to speech or change text. Changing
+  tracks cancels stale waveform work. Preview/seek support still depends on codecs.
+- **Navigate** supplies **Ctrl+Up / Ctrl+Down** for previous/next cue, **Ctrl+E**
+  to edit current dialogue, **Alt+Up / Alt+Down** to edit previous/next dialogue,
+  and **F6** to replay the current cue (**F4** also remains). Navigation commits
+  the pending edit and wraps at the ends of the list.
+- **Checks / Next warning** now also flag overlapping cues (including nested
+  overlaps), possible repeated text within 500 ms, and gaps of at least three
+  seconds. Gaps may be intentional silence. All checks are advisory: no automatic
+  filling, deletion or timing repair is performed, and valid cues still export.
+- **Export SRT** remembers the folder and per-video filename, appends `.srt` when
+  no extension is supplied, and asks before overwriting an existing file. The
+  source video and open project cannot be replaced by an SRT. Failed/cancelled
+  exports retain unsaved state. Existing atomic SRT writing is preserved.
+- **Ctrl+B / File → Batch episodes…** queues videos with the current settings or
+  a saved show profile. Choose an output folder and start; jobs run sequentially
+  in isolated processes. **Auto English** requires an English-tagged track and
+  avoids commentary where another tagged track exists. For untagged files,
+  choose a numbered track explicitly. Model and optional-download choices are
+  copied from the editor when starting. Current editor subtitles are untouched.
+  Each spoken result gets its own SRT; existing/same-name files get `_2`, `_3`,
+  etc. without overwriting. Silence creates no SRT. Failures are shown per row
+  and do not stop later jobs; Start retries rows without completed exports.
+  Cancel/close stops the active child, keeps completed exports, leaves remaining
+  rows queued, and ignores late results. The queue is session-only, not persisted
+  across restarts. Review generated SRTs before use.
+
+## Manual editing tools (introduced in v0.5.0)
 
 All tools work locally. Each replacement, timing change, split, merge or rule
 application is one undoable operation, with normal recovery and SRT export.
@@ -214,7 +267,7 @@ python scripts/bundle_model.py dist/Dubtitler
 python scripts/bundle_speakers.py dist/Dubtitler
 python scripts/collect_licenses.py dist/Dubtitler
 Copy-Item README.md,THIRD_PARTY_NOTICES.md dist/Dubtitler/
-Compress-Archive -Path dist/Dubtitler -DestinationPath Dubtitler-v0.5.0-Windows-Offline-Portable.zip
+Compress-Archive -Path dist/Dubtitler -DestinationPath Dubtitler-v0.6.0-Windows-Offline-Portable.zip
 ```
 
 The workflow builds on pull requests, main pushes, and manual runs. It tests the
@@ -224,7 +277,7 @@ model manifests, runs the offline neural speaker detector on silence, checks wor
 voice/silence splitting and context rules, selects the English track of a generated dual-track video, checks
 replay/loop control, spawns a real transcription process, cancels and restarts it,
 loads the bundled model, runs VAD on silence, and exercises the decoder. It
-uploads the portable only after that test passes. A `v0.5.0` tag
+uploads the portable only after that test passes. A `v0.6.0` tag
 publishes a preview release after the build passes; ordinary pushes do not
 rewrite an existing release. CI does not replace manual playback and real-video
 quality testing on another Windows PC.

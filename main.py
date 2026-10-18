@@ -24,12 +24,13 @@ from editing import EditingSafety
 from transcription_options import normalize_options
 from subtitle_format import timestamp, parse_timestamp, read_srt
 from editor_tools import EditorTools
+from workspace_tools import WorkspaceTools
 
 
-class MainWindow(EditorTools, PlaybackTools, EditingSafety, QMainWindow):
-    def __init__(self, recovery_directory=None, offer_recovery=True, profiles_directory=None):
+class MainWindow(WorkspaceTools, EditorTools, PlaybackTools, EditingSafety, QMainWindow):
+    def __init__(self, recovery_directory=None, offer_recovery=True, profiles_directory=None, workspace_directory=None):
         super().__init__()
-        self.setWindowTitle('Dubtitler v0.5.0 — English Dub Subtitle Editor')
+        self.setWindowTitle('Dubtitler v0.6.0 — English Dub Subtitle Editor')
         self.resize(1200, 950)
         self.video_path = None
         self.busy = False
@@ -41,6 +42,7 @@ class MainWindow(EditorTools, PlaybackTools, EditingSafety, QMainWindow):
         self.player.setAudioOutput(self.audio)
         self.audio.setVolume(0.8)
         self.video = QVideoWidget()
+        self.video.setMinimumHeight(100)
         self.player.setVideoOutput(self.video)
         self.caption = QLabel('Open a video to begin')
         self.caption.setAlignment(Qt.AlignCenter)
@@ -88,14 +90,23 @@ class MainWindow(EditorTools, PlaybackTools, EditingSafety, QMainWindow):
         bar.addWidget(self.model)
         self.transcribe_button = self.add_button(bar, 'Transcribe English Dub', self.transcribe)
         self.cancel_button = self.add_button(bar, 'Cancel transcription', self.cancel_transcription)
+        self.details_button = QPushButton('Show context / model options')
+        self.details_button.setCheckable(True)
+        bar.addWidget(self.details_button)
         bar.addStretch()
+        self.transcription_details = QWidget()
+        details_layout = QVBoxLayout(self.transcription_details)
+        details_layout.setContentsMargins(0, 0, 0, 0)
+        transcribe_layout.addWidget(self.transcription_details)
+        self.details_button.toggled.connect(self.transcription_details.setVisible)
+        self.transcription_details.hide()
         self.model_hint = QLabel()
         self.model_hint.setWordWrap(True)
-        transcribe_layout.addWidget(self.model_hint)
+        details_layout.addWidget(self.model_hint)
         self.allow_download = QCheckBox('Allow a one-time download if this model is missing (internet required; reused from cache afterwards)')
-        transcribe_layout.addWidget(self.allow_download)
+        details_layout.addWidget(self.allow_download)
         context_row = QHBoxLayout()
-        transcribe_layout.addLayout(context_row)
+        details_layout.addLayout(context_row)
         self.context_preset = QComboBox()
         self.context_preset.addItems(['Custom / no preset', 'Haikyuu — Seijou'])
         context_row.addWidget(QLabel('Show context:'))
@@ -109,7 +120,7 @@ class MainWindow(EditorTools, PlaybackTools, EditingSafety, QMainWindow):
         self.speaker_changes.setToolTip('Starts a new cue when a different voice is detected. Adds analysis time; overlapping voices and music can confuse detection. Does not identify character names.')
         context_row.addWidget(self.speaker_changes)
         names_row = QHBoxLayout()
-        transcribe_layout.addLayout(names_row)
+        details_layout.addLayout(names_row)
         names_row.addWidget(QLabel('Names / terms:'))
         self.name_hints = QLineEdit()
         self.name_hints.setMaxLength(600)
@@ -170,6 +181,7 @@ class MainWindow(EditorTools, PlaybackTools, EditingSafety, QMainWindow):
         self.init_playback(choose_layout, controls)
         self.init_editing(row_controls, recovery_directory, offer_recovery)
         self.init_editor_tools(tool_controls, context_row, profiles_directory)
+        self.init_workspace(player_layout, workspace_directory if workspace_directory is not None else (Path(recovery_directory) / "workspace" if recovery_directory is not None else None))
         self.update_readability()
         self.refresh_actions()
 
@@ -204,6 +216,7 @@ class MainWindow(EditorTools, PlaybackTools, EditingSafety, QMainWindow):
         self.loop_replay.setEnabled(not self.busy)
         self.replay_context.setEnabled(not self.busy)
         self.refresh_editor_tools()
+        self.refresh_workspace()
 
     def editor_changed(self, item):
         self.change_cells(self.raw_cells(), 'Edit subtitle', (item.row(), item.column()))
@@ -269,6 +282,10 @@ class MainWindow(EditorTools, PlaybackTools, EditingSafety, QMainWindow):
         self.statusBar().showMessage('Transcription cancelled')
 
     def closeEvent(self, event):
+        if self.batch_dialog and self.batch_dialog.running:
+            QMessageBox.information(self, 'Batch in progress', 'Cancel the batch queue and wait for it to stop before closing.')
+            event.ignore()
+            return
         if self.busy or (self.worker is not None and self.worker.isRunning()):
             QMessageBox.information(self, 'Transcription in progress', 'Cancel transcription, then close once cancellation finishes.')
             event.ignore()
@@ -277,9 +294,18 @@ class MainWindow(EditorTools, PlaybackTools, EditingSafety, QMainWindow):
             QMessageBox.information(self, 'Reading audio tracks', 'Wait for the audio-track list to finish loading, then close.')
             event.ignore()
             return
+        if not self.flush_project():
+            event.ignore()
+            return
         if not self.confirm_unsaved('close Dubtitler'):
             event.ignore()
             return
+        if not self.stop_waveform():
+            event.ignore()
+            return
+        self.project_timer.stop()
+        self.project_loading = True
+        self.release_project()
         self.finish_editing()
         self.stop_replay()
         self.player.stop()
@@ -308,9 +334,18 @@ class MainWindow(EditorTools, PlaybackTools, EditingSafety, QMainWindow):
                     return
             elif not self.confirm_unsaved('choose another video'):
                 return
+            if not self.flush_project():
+                return False
+            self.release_project()
+            self.project_path = None
+            self.project_restore_position = None
             self.set_rows([], clean=True)
             self.srt_path = None
             self.load_video(path)
+            if Path(path).is_file():
+                self.begin_project_session()
+                self.autosave_project()
+                self.remember_project()
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(0)
             self.progress_bar.setFormat('Ready to transcribe')
@@ -366,6 +401,10 @@ class MainWindow(EditorTools, PlaybackTools, EditingSafety, QMainWindow):
         if not self.seek.isSliderDown():
             self.seek.setValue(pos)
         self.update_caption(pos)
+        if hasattr(self, 'waveform'):
+            self.waveform.set_position(pos)
+            if self.project_path and not self.project_timer.isActive() and not self.project_loading:
+                self.project_timer.start(2000)
 
     def update_caption(self, pos):
         for row in range(self.table.rowCount()):
@@ -449,6 +488,12 @@ class MainWindow(EditorTools, PlaybackTools, EditingSafety, QMainWindow):
                 return
             self.srt_path = path
             self.set_rows(rows, clean=True)
+            if self.project_path is None:
+                self.begin_project_session()
+                self.autosave_project()
+                self.remember_project()
+            else:
+                self.schedule_project_save()
             self.statusBar().showMessage(f'Imported {len(rows)} subtitles')
             return True
         except Exception as exc:
@@ -464,9 +509,19 @@ class MainWindow(EditorTools, PlaybackTools, EditingSafety, QMainWindow):
         except ValueError as exc:
             QMessageBox.warning(self, 'Invalid subtitle timing', str(exc))
             return False
-        default_path = self.srt_path or (str(Path(self.video_path).with_suffix('.srt')) if self.video_path else 'subtitles.srt')
-        path, _ = QFileDialog.getSaveFileName(self, 'Export subtitles', default_path, 'SubRip (*.srt)')
+        default_path = self.srt_path or self.export_default()
+        path, _ = QFileDialog.getSaveFileName(self, 'Export subtitles', default_path, 'SubRip (*.srt)', options=QFileDialog.DontConfirmOverwrite)
         if path:
+            if not Path(path).suffix:
+                path += '.srt'
+            if self.video_path and Path(path).resolve() == Path(self.video_path).resolve():
+                QMessageBox.warning(self, 'Choose another export name', 'The SRT cannot replace the source video.')
+                return False
+            if self.project_path and Path(path).resolve() == Path(self.project_path).resolve():
+                QMessageBox.warning(self, 'Choose another export name', 'The SRT cannot replace the open project.')
+                return False
+            if Path(path).exists() and QMessageBox.question(self, 'Replace existing SRT?', f'Overwrite {path}?', QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+                return False
             blocks = [f'{i}\n{timestamp(start)} --> {timestamp(end)}\n{text}' for i, (start, end, text) in enumerate(rows, 1)]
             try:
                 from PySide6.QtCore import QSaveFile, QIODevice
@@ -484,6 +539,7 @@ class MainWindow(EditorTools, PlaybackTools, EditingSafety, QMainWindow):
                 return False
             self.srt_path = path
             self.mark_saved()
+            self.remember_export(path)
             self.statusBar().showMessage(f'Exported {len(rows)} subtitles to {path}')
             return True
         return False

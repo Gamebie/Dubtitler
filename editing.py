@@ -86,7 +86,8 @@ class EditingSafety:
 
     def document_changed(self):
         self.recovery_saved = False
-        self.setWindowTitle('Dubtitler v0.5.0 — English Dub Subtitle Editor' + (' *' if self.dirty else ''))
+        self.setWindowTitle('Dubtitler v0.6.0 — English Dub Subtitle Editor' + (' *' if self.dirty else ''))
+        self.schedule_project_save()
         if self.dirty:
             self.save_status.setText('Unsaved edits · saving recovery…')
             self.autosave_timer.start()

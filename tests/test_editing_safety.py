@@ -123,7 +123,7 @@ class SafetyTests(unittest.TestCase):
         self.window.save_recovery()
         output = self.root / 'existing.srt'
         output.write_text('Original file', encoding='utf-8')
-        with patch.object(QFileDialog, 'getSaveFileName', return_value=(str(output), '')), patch('PySide6.QtCore.QSaveFile.commit', return_value=False), patch.object(QMessageBox, 'warning'):
+        with patch.object(QFileDialog, 'getSaveFileName', return_value=(str(output), '')), patch('PySide6.QtCore.QSaveFile.commit', return_value=False), patch.object(QMessageBox, 'warning'), patch.object(QMessageBox, 'question', return_value=QMessageBox.Yes):
             self.assertFalse(self.window.export_srt())
         self.assertEqual(output.read_text(encoding='utf-8'), 'Original file')
         self.assertTrue(self.window.dirty)
