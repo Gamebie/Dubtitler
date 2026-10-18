@@ -1,4 +1,3 @@
-import re
 import sys
 from pathlib import Path
 
@@ -23,30 +22,14 @@ from transcriber import Transcriber
 from playback import PlaybackTools
 from editing import EditingSafety
 from transcription_options import normalize_options
+from subtitle_format import timestamp, parse_timestamp, read_srt
+from editor_tools import EditorTools
 
 
-def timestamp(ms):
-    ms = max(0, int(ms))
-    h, rem = divmod(ms, 3600000)
-    m, rem = divmod(rem, 60000)
-    s, milli = divmod(rem, 1000)
-    return f'{h:02}:{m:02}:{s:02},{milli:03}'
-
-
-def parse_timestamp(value):
-    match = re.fullmatch(r'\s*(\d+):(\d{2}):(\d{2})[,.](\d{3})\s*', value)
-    if not match:
-        raise ValueError('Use HH:MM:SS,mmm')
-    h, m, s, milli = map(int, match.groups())
-    if m >= 60 or s >= 60:
-        raise ValueError('Minutes and seconds must be under 60')
-    return ((h * 60 + m) * 60 + s) * 1000 + milli
-
-
-class MainWindow(PlaybackTools, EditingSafety, QMainWindow):
-    def __init__(self, recovery_directory=None, offer_recovery=True):
+class MainWindow(EditorTools, PlaybackTools, EditingSafety, QMainWindow):
+    def __init__(self, recovery_directory=None, offer_recovery=True, profiles_directory=None):
         super().__init__()
-        self.setWindowTitle('Dubtitler v0.4.0 — English Dub Subtitle Editor')
+        self.setWindowTitle('Dubtitler v0.5.0 — English Dub Subtitle Editor')
         self.resize(1200, 950)
         self.video_path = None
         self.busy = False
@@ -88,7 +71,7 @@ class MainWindow(PlaybackTools, EditingSafety, QMainWindow):
         file_row = QHBoxLayout()
         choose_layout.addLayout(file_row)
         self.open_button = self.add_button(file_row, 'Choose Video…', self.open_video)
-        self.video_label = QLabel('Start here: choose the video containing the English dub audio.')
+        self.video_label = QLabel('Choose or drop a video here. You can also drop an SRT, or a video and SRT together.')
         self.video_label.setWordWrap(True)
         file_row.addWidget(self.video_label, 1)
         outer.addWidget(choose)
@@ -176,6 +159,8 @@ class MainWindow(PlaybackTools, EditingSafety, QMainWindow):
         self.delete_button = self.add_button(row_controls, 'Delete Selected', self.delete_row)
         row_controls.addStretch()
         self.export_button = self.add_button(row_controls, 'Export SRT…', self.export_srt)
+        tool_controls = QHBoxLayout()
+        editor_layout.addLayout(tool_controls)
         editor_layout.addWidget(self.table)
         split.addWidget(editor_pane)
         split.setSizes([270, 330])
@@ -184,6 +169,8 @@ class MainWindow(PlaybackTools, EditingSafety, QMainWindow):
         self.statusBar().showMessage('Ready')
         self.init_playback(choose_layout, controls)
         self.init_editing(row_controls, recovery_directory, offer_recovery)
+        self.init_editor_tools(tool_controls, context_row, profiles_directory)
+        self.update_readability()
         self.refresh_actions()
 
     def update_model_hint(self):
@@ -216,6 +203,7 @@ class MainWindow(PlaybackTools, EditingSafety, QMainWindow):
         self.stop_replay_button.setEnabled(self.replay_range is not None)
         self.loop_replay.setEnabled(not self.busy)
         self.replay_context.setEnabled(not self.busy)
+        self.refresh_editor_tools()
 
     def editor_changed(self, item):
         self.change_cells(self.raw_cells(), 'Edit subtitle', (item.row(), item.column()))
@@ -232,6 +220,10 @@ class MainWindow(PlaybackTools, EditingSafety, QMainWindow):
             self.progress_bar.setFormat('Current phase: %p%')
 
     def apply_context_preset(self, index):
+        if index >= 2:
+            self.load_show_profile(self.context_preset.itemData(index))
+            return
+        self.exact_replacements.clear()
         if index == 1:
             self.show_context.setText('Haikyuu. English dub about volleyball and the Seijou team.')
             self.name_hints.setText('Seijou, Aoba Johsai')
@@ -300,11 +292,12 @@ class MainWindow(PlaybackTools, EditingSafety, QMainWindow):
         layout.addWidget(button)
         return button
 
-    def open_video(self):
+    def open_video(self, path=None):
         if self.busy or self.track_probe is not None:
             return
         self.finish_cell_edit()
-        path, _ = QFileDialog.getOpenFileName(self, 'Choose a video with English audio', '', 'Video (*.mp4 *.mkv *.mov *.avi *.webm);;All files (*)')
+        if not path:
+            path, _ = QFileDialog.getOpenFileName(self, 'Choose a video with English audio', '', 'Video (*.mp4 *.mkv *.mov *.avi *.webm *.m4v *.wmv);;All files (*)')
         if path:
             if self.table.rowCount():
                 if self.dirty:
@@ -324,6 +317,7 @@ class MainWindow(PlaybackTools, EditingSafety, QMainWindow):
             self.progress_label.setText('Next: keep Base English for the bundled offline model, then click Transcribe English Dub.')
             self.refresh_actions()
             self.statusBar().showMessage(f'Opened {Path(path).name}')
+            return True
 
     def toggle_play(self):
         self.stop_replay(pause=False)
@@ -441,30 +435,22 @@ class MainWindow(PlaybackTools, EditingSafety, QMainWindow):
         QMessageBox.critical(self, 'Transcription failed', message)
         self.statusBar().showMessage('Transcription failed')
 
-    def import_srt(self):
+    def import_srt(self, path=None, parsed_rows=None):
+        if self.busy:
+            return False
         self.finish_cell_edit()
-        path, _ = QFileDialog.getOpenFileName(self, 'Import subtitles', '', 'SubRip (*.srt)')
+        if not path:
+            path, _ = QFileDialog.getOpenFileName(self, 'Import subtitles', '', 'SubRip (*.srt)')
         if not path:
             return
         try:
-            content = Path(path).read_text(encoding='utf-8-sig')
-            rows = []
-            for block in re.split(r'\n\s*\n', content.replace('\r\n', '\n').strip()):
-                lines = block.splitlines()
-                timing_idx = next((i for i, line in enumerate(lines) if '-->' in line), None)
-                if timing_idx is None:
-                    continue
-                start, end = [part.strip() for part in lines[timing_idx].split('-->', 1)]
-                rows.append((parse_timestamp(start), parse_timestamp(end), '\n'.join(lines[timing_idx+1:])))
-            if not rows:
-                raise ValueError('No subtitle cues found. Existing subtitles were kept.')
-            if any(end <= start for start, end, _ in rows):
-                raise ValueError('Subtitle end must be after start. Existing subtitles were kept.')
+            rows = read_srt(path) if parsed_rows is None else parsed_rows
             if not self.confirm_unsaved('import another SRT and replace these subtitles'):
                 return
             self.srt_path = path
             self.set_rows(rows, clean=True)
             self.statusBar().showMessage(f'Imported {len(rows)} subtitles')
+            return True
         except Exception as exc:
             QMessageBox.warning(self, 'Import error', str(exc))
 

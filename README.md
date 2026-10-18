@@ -1,11 +1,11 @@
-# Dubtitler v0.4.0
+# Dubtitler v0.5.0
 
 A local Windows app for creating, editing, and exporting English dub subtitles.
 
 ## Use the offline portable app (recommended)
 
-1. Download **Dubtitler-v0.4.0-Windows-Offline-Portable.zip** from a successful
-   Actions build, or from the v0.4.0 preview release when published.
+1. Download **Dubtitler-v0.5.0-Windows-Offline-Portable.zip** from a successful
+   Actions build, or from the v0.5.0 preview release when published.
 2. Right-click the ZIP and **Extract All**. Keep the entire `Dubtitler` folder,
    including `_internal` and `models`. Run `Dubtitler.exe` inside that folder.
    No installer, Python installation, account, or model download is needed.
@@ -22,7 +22,51 @@ compression), plus neural speaker models (about 35 MB). Other transcription mode
 the v0.4 workflow**; old v0.1 installer/portable downloads do not include this model.
 The old Inno Setup script is retained only as a legacy build reference.
 
-## Speech timing, voice changes and names (v0.4.0)
+## Manual editing tools (v0.5.0)
+
+All tools work locally. Each replacement, timing change, split, merge or rule
+application is one undoable operation, with normal recovery and SRT export.
+
+- **Find / replace** (`Ctrl+H`) searches dialogue with a live match count, whole
+  words (on by default) and optional case matching. Find next cycles through
+  matching cues. Replace all applies literal text, including punctuation and
+  Unicode, to every matching cue; timestamps are untouched. A blank replacement
+  removes matches. `Ctrl+Z` undoes the entire replacement.
+  **Remember this correction in a show profile…** adds the current whole-word,
+  case-insensitive correction to “Always replace” and opens the profile manager
+  to save it. Remembering a rule does not replace existing subtitle text.
+- **Profiles…** saves the current context, names, “Always replace” spelling rules,
+  and voice-change setting under a show name. Choose a saved show in the context
+  dropdown before another episode. Add a recurring rule such as
+  `say joe => Seijou` in **Always replace**, then save your profile. Loading a
+  profile leaves existing cues alone; **Apply current spelling rules to existing
+  subtitles** in the profile dialog applies the current rules as one undoable edit.
+  Save offers confirmation before overwriting a profile. Delete removes only the
+  saved profile, keeping current settings/subtitles. Profiles are stored at
+  `%LOCALAPPDATA%\Dubtitler\profiles\shows.json`, with atomic saves and a lock for
+  multiple windows. `DUBTITLER_PROFILE_DIR` overrides this directory.
+- In **Subtitle tools**, **Set start to playhead** (`Ctrl+Alt+S`) and **Set end to
+  playhead** (`Ctrl+Alt+E`) adjust one selected cue. Load a video first. Invalid
+  start/end order is rejected. **Shift timing…** (`Ctrl+Shift+T`) moves all cues or
+  selected rows by milliseconds: positive means later; negative means earlier.
+  A negative/invalid resulting cue cancels the whole shift, without clamping.
+- **Split at playhead…** (`Ctrl+Shift+S`) requires one selected cue and a playhead
+  strictly inside it. The dialog suggests a text boundary; click or move the text
+  cursor to choose exactly where to split. Every original character is retained
+  across the two parts. **Merge selected** (`Ctrl+M`) joins consecutive rows in
+  timeline order, retaining their outer time range and text separated by newlines.
+  Merge can intentionally bridge a quiet gap; replay the result before exporting.
+- **Readability** highlights cues and supplies hover explanations for fast reading
+  (over 20 non-space characters/second), a display shorter than 0.7 seconds, lines
+  longer than 42 characters, more than two lines, or invalid timing. **Next warning**
+  cycles through these cues. These are review guides, not universal subtitle
+  standards; readability warnings never block export. Invalid timings still do.
+- **Drag and drop** one video, one SRT, or a video/SRT pair onto the window. SRTs
+  are validated before replacing the current document; normal Save/Discard/Cancel
+  protection applies. Multiple videos/SRTs, folders, remote URLs and unsupported
+  file types are rejected. Drops wait until transcription or track reading ends.
+
+## Speech timing, voice changes and names (introduced in v0.4.0)
 
 - Recognition now aligns individual words. New cues start at detected speech
   regions, pauses of 350 ms or more between words, detected speaker changes,
@@ -170,7 +214,7 @@ python scripts/bundle_model.py dist/Dubtitler
 python scripts/bundle_speakers.py dist/Dubtitler
 python scripts/collect_licenses.py dist/Dubtitler
 Copy-Item README.md,THIRD_PARTY_NOTICES.md dist/Dubtitler/
-Compress-Archive -Path dist/Dubtitler -DestinationPath Dubtitler-v0.4.0-Windows-Offline-Portable.zip
+Compress-Archive -Path dist/Dubtitler -DestinationPath Dubtitler-v0.5.0-Windows-Offline-Portable.zip
 ```
 
 The workflow builds on pull requests, main pushes, and manual runs. It tests the
@@ -180,7 +224,7 @@ model manifests, runs the offline neural speaker detector on silence, checks wor
 voice/silence splitting and context rules, selects the English track of a generated dual-track video, checks
 replay/loop control, spawns a real transcription process, cancels and restarts it,
 loads the bundled model, runs VAD on silence, and exercises the decoder. It
-uploads the portable only after that test passes. A `v0.4.0` tag
+uploads the portable only after that test passes. A `v0.5.0` tag
 publishes a preview release after the build passes; ordinary pushes do not
 rewrite an existing release. CI does not replace manual playback and real-video
 quality testing on another Windows PC.
