@@ -331,9 +331,9 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(output.read_text(), 'Keep existing')
         with patch.object(QFileDialog, 'getSaveFileName', return_value=(str(output), '')), patch.object(QMessageBox, 'question', return_value=QMessageBox.Yes):
             self.assertTrue(w.export_srt())
-        self.assertEqual(w.export_default(), str(output))
+        self.assertTrue(Path(w.export_default()).samefile(output))
         other = self.new_window()
-        self.assertEqual(other.export_default(), str(output))
+        self.assertTrue(Path(other.export_default()).samefile(output))
 
     def test_batch_success_failure_retry_cancel_and_editor_unchanged(self):
         self.seed()
